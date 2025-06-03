@@ -30,11 +30,20 @@ The system follows a clean separation of concerns with three main components:
 - Retry mechanisms
 - Parser selection and instantiation
 
-### 3. Parsers
-- HTML content extraction
-- Metadata field parsing
-- Fallback strategies
-- Type-specific parsing logic
+### 3. Parser System
+The parser system is split into two levels:
+
+#### Page Parsers
+- Coordinate metadata extraction
+- Combine multiple metadata parsers
+- Handle overall page structure
+- Manage metadata field assembly
+
+#### Metadata Parsers
+- Extract specific metadata fields
+- Handle field-specific fallback logic
+- Clean and format extracted data
+- Validate field content
 
 This separation allows:
 - Independent testing of each component
@@ -92,9 +101,11 @@ export class CustomSiteFetcher extends BaseFetcher {
 }
 ```
 
-### 2. Parsers
+### 2. Parser System
 
-Parsers handle HTML content extraction:
+#### Page Parsers
+
+Page parsers coordinate the extraction of all metadata fields:
 
 ```typescript
 export class CustomParser extends BasePageParser {
@@ -102,7 +113,7 @@ export class CustomParser extends BasePageParser {
     super({
       name: 'CustomParser',
       metadataParsers: {
-        title: CustomTitleParser,
+        title: CustomTitleParser,       // Individual field parsers
         description: CustomDescriptionParser,
         date: CustomDateParser,
         author: CustomAuthorParser
@@ -111,6 +122,7 @@ export class CustomParser extends BasePageParser {
   }
 
   parseMetadata($: CheerioAPI): PageMetadata {
+    // Coordinate metadata extraction
     return {
       url: '',  // Set by fetcher
       title: this.titleParser.parse($),
@@ -122,18 +134,63 @@ export class CustomParser extends BasePageParser {
 }
 ```
 
-### 3. Metadata Parsers
+#### Metadata Parsers
 
-Each metadata parser focuses on extracting a specific type of content:
+Each metadata parser specializes in extracting a specific field:
 
+1. **Title Parser**
 ```typescript
 export class CustomTitleParser extends BaseMetadataParser {
   parse($: CheerioAPI): string | null {
-    // Extract title using multiple strategies
+    // Extract title with fallbacks
     return (
       $('meta[property="og:title"]').attr('content') ||
       $('title').text().trim() ||
       $('h1').first().text().trim() ||
+      null
+    );
+  }
+}
+```
+
+2. **Description Parser**
+```typescript
+export class CustomDescriptionParser extends BaseMetadataParser {
+  parse($: CheerioAPI): string | null {
+    // Extract description with fallbacks
+    return (
+      $('meta[property="og:description"]').attr('content') ||
+      $('meta[name="description"]').attr('content') ||
+      $('p').first().text().trim() ||
+      null
+    );
+  }
+}
+```
+
+3. **Date Parser**
+```typescript
+export class CustomDateParser extends BaseMetadataParser {
+  parse($: CheerioAPI): string | null {
+    // Extract and normalize publication date
+    const dateStr = 
+      $('meta[property="article:published_time"]').attr('content') ||
+      $('time[datetime]').attr('datetime');
+    
+    return dateStr ? new Date(dateStr).toISOString() : null;
+  }
+}
+```
+
+4. **Author Parser**
+```typescript
+export class CustomAuthorParser extends BaseMetadataParser {
+  parse($: CheerioAPI): string | null {
+    // Extract author information
+    return (
+      $('meta[name="author"]').attr('content') ||
+      $('.author-name').text().trim() ||
+      $('.byline').text().replace('By', '').trim() ||
       null
     );
   }
@@ -150,13 +207,19 @@ The system includes comprehensive error handling:
    - Timeout management
    - Redirect handling
 
-2. **Parsers**
-   - Null safety
-   - Fallback strategies
-   - Type validation
-   - Clean error messages
+2. **Page Parsers**
+   - Missing metadata fields
+   - Invalid page structure
+   - Metadata assembly errors
+   - Field validation
 
-3. **URL Discovery**
+3. **Metadata Parsers**
+   - Missing content
+   - Invalid field formats
+   - Data cleaning errors
+   - Fallback handling
+
+4. **URL Discovery**
    - Invalid XML handling
    - Network failures
    - Malformed URLs
