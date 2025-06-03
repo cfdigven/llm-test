@@ -12,8 +12,6 @@ export class DefaultParser extends BasePageParser {
   constructor() {
     super({
       name: 'DefaultParser',
-      urlPatterns: ['.*'],
-      priority: 0, // Lowest priority as it's the default fallback
       metadataParsers: {
         title: DefaultTitleParser,
         description: DefaultDescriptionParser,

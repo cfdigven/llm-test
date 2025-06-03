@@ -10,8 +10,6 @@ export interface PageMetadata {
 
 export interface PageParserConfig {
   name: string;
-  urlPatterns: string[];
-  priority: number; // Higher number means higher priority
   metadataParsers?: {
     title?: new () => MetadataParser;
     description?: new () => MetadataParser;
