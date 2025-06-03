@@ -1,130 +1,68 @@
-# Web Page Metadata Parser
+# Web Content Processing System
 
-A flexible and extensible system for discovering, fetching, and parsing metadata from web pages. The system uses a modular architecture with customizable fetchers, parsers, and URL discovery.
+A distributed system for discovering, fetching, and parsing metadata from web pages at scale. The system uses a master-worker architecture for processing multiple domains efficiently and reliably.
 
-## Features
+## System Architecture
 
-- 🎯 URL pattern-based fetcher selection
-- 🔄 Configurable retry and timeout mechanisms
-- 🎨 Customizable metadata parsers
-- 🔍 Smart content extraction
-- ⚡ Priority-based fetcher selection
-- 🛡️ Built-in error handling and fallbacks
-- 🗺️ Intelligent sitemap discovery and processing
-- 🌲 Support for nested sitemaps and indexes
+### Master Server
+- Coordinates all processing tasks
+- Hosts PostgreSQL database and Redis cache
+- Manages file generation and scheduling
+- Handles system recovery and monitoring
 
-## Architecture
+### Worker Servers
+- Process URLs in parallel
+- Extract metadata from web pages
+- Handle rate limiting and retries
+- Report progress to master
 
-The system follows a clean separation of concerns with three main components:
+## Core Features
 
-### 1. URL Discovery (SiteURLService)
-- Finds and processes sitemaps
-- Handles sitemap index files
-- Processes nested sitemaps
-- Filters content URLs
+### 1. URL Discovery
+- 🔍 Smart sitemap processing
+- 🌲 Support for nested sitemaps
+- 🎯 Domain-specific URL patterns
+- 🚦 Automatic rate limiting
 
-### 2. Fetchers (FetcherService)
-- URL pattern matching and routing
-- Site-specific configuration
-- HTTP request handling
-- Retry mechanisms
-- Parser selection and instantiation
+### 2. Content Processing
+- 📄 Flexible metadata extraction
+- 🎨 Site-specific parsing rules
+- 🔄 Retry and fallback strategies
+- ⚡ Parallel processing
 
-### 3. Parser System
-The parser system is split into two levels:
+### 3. File Generation
+- 📁 Segmented file creation
+- 🔄 Atomic file updates
+- 📚 Version management
+- 🗄️ Automatic archiving
 
-#### Page Parsers
-- Coordinate metadata extraction
-- Combine multiple metadata parsers
-- Handle overall page structure
-- Manage metadata field assembly
+### 4. System Management
+- ⏰ Configurable scheduling
+- 💪 Fault tolerance
+- 📊 Progress monitoring
+- 🛠️ Automatic recovery
 
-#### Metadata Parsers
-- Extract specific metadata fields
-- Handle field-specific fallback logic
-- Clean and format extracted data
-- Validate field content
+## Component Details
 
-This separation allows:
-- Independent testing of each component
-- Easy addition of new site support
-- Clean, focused implementations
-- Flexible component reuse
-
-## Quick Start
-
+### 1. URL Discovery Service
 ```typescript
-import { SiteURLService } from './sitemap/SiteURLService';
-import { FetcherService } from './fetcher/FetcherService';
-
-async function processWebsite(domain: string) {
-  // 1. Initialize services
-  const urlService = new SiteURLService();
-  const fetcherService = new FetcherService();
-
-  // 2. Discover URLs
-  const urls = await urlService.getSiteURLs(domain);
-  
-  // 3. Process URLs
-  for (const { url } of urls) {
-    try {
-      const metadata = await fetcherService.getMetadata(url);
-      console.log('Metadata:', metadata);
-    } catch (error) {
-      console.error(`Failed to process ${url}:`, error);
-    }
+// Finds and processes URLs from domains
+class SiteURLService {
+  async getSiteURLs(domain: string): Promise<URL[]> {
+    // Process sitemaps
+    // Handle nested indexes
+    // Filter content URLs
+    // Return discovered URLs
   }
 }
 ```
 
-## Components
-
-### 1. Fetchers
-
-Fetchers handle URL matching and HTTP requests:
-
+### 2. Content Processing
 ```typescript
-export class CustomSiteFetcher extends BaseFetcher {
-  constructor() {
-    super({
-      name: 'CustomSiteFetcher',
-      urlPatterns: ['^https?://site\\.com/.*'],  // URL routing pattern
-      priority: 100,                             // Higher priority than default
-      parser: CustomParser,                      // Parser to use
-      defaultConfig: {
-        retries: 3,
-        timeout: 10000,
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      }
-    });
-  }
-}
-```
-
-### 2. Parser System
-
-#### Page Parsers
-
-Page parsers coordinate the extraction of all metadata fields:
-
-```typescript
-export class CustomParser extends BasePageParser {
-  constructor() {
-    super({
-      name: 'CustomParser',
-      metadataParsers: {
-        title: CustomTitleParser,       // Individual field parsers
-        description: CustomDescriptionParser,
-        date: CustomDateParser,
-        author: CustomAuthorParser
-      }
-    });
-  }
-
+// Handles metadata extraction
+class PageParser {
   parseMetadata($: CheerioAPI): PageMetadata {
-    // Coordinate metadata extraction
     return {
-      url: '',  // Set by fetcher
       title: this.titleParser.parse($),
       description: this.descriptionParser.parse($),
       date: this.dateParser.parse($),
@@ -134,15 +72,13 @@ export class CustomParser extends BasePageParser {
 }
 ```
 
-#### Metadata Parsers
+### 3. Metadata Parsers
+Each parser specializes in extracting specific content:
 
-Each metadata parser specializes in extracting a specific field:
-
-1. **Title Parser**
+#### Title Parser
 ```typescript
-export class CustomTitleParser extends BaseMetadataParser {
+class TitleParser extends BaseMetadataParser {
   parse($: CheerioAPI): string | null {
-    // Extract title with fallbacks
     return (
       $('meta[property="og:title"]').attr('content') ||
       $('title').text().trim() ||
@@ -153,11 +89,10 @@ export class CustomTitleParser extends BaseMetadataParser {
 }
 ```
 
-2. **Description Parser**
+#### Description Parser
 ```typescript
-export class CustomDescriptionParser extends BaseMetadataParser {
+class DescriptionParser extends BaseMetadataParser {
   parse($: CheerioAPI): string | null {
-    // Extract description with fallbacks
     return (
       $('meta[property="og:description"]').attr('content') ||
       $('meta[name="description"]').attr('content') ||
@@ -168,95 +103,140 @@ export class CustomDescriptionParser extends BaseMetadataParser {
 }
 ```
 
-3. **Date Parser**
+## Distributed Processing
+
+### Task Flow
+1. **System Initialization**
+   - Database setup
+   - Table creation
+   - Cache initialization
+
+2. **URL Discovery**
+   - Sitemap processing
+   - URL validation
+   - Storage in database
+
+3. **Content Processing**
+   - Worker batch claiming
+   - Metadata extraction
+   - Result storage
+
+4. **File Generation**
+   - Segment creation
+   - Index generation
+   - File replacement
+
+### Recovery System
+
+#### Worker Recovery
+- Heartbeat monitoring
+- Stale batch detection
+- Automatic retry
+- Progress tracking
+
+#### Task Recovery
+- State verification
+- Resource cleanup
+- Task restart
+- Error handling
+
+## Configuration
+
+### Global Settings
 ```typescript
-export class CustomDateParser extends BaseMetadataParser {
-  parse($: CheerioAPI): string | null {
-    // Extract and normalize publication date
-    const dateStr = 
-      $('meta[property="article:published_time"]').attr('content') ||
-      $('time[datetime]').attr('datetime');
-    
-    return dateStr ? new Date(dateStr).toISOString() : null;
+{
+  schedule: {
+    type: 'daily',
+    time: '00:00',
+    timezone: 'UTC'
+  },
+  workers: {
+    batchSize: 1000,
+    maxRetries: 3
+  },
+  storage: {
+    retainVersions: 3
   }
 }
 ```
 
-4. **Author Parser**
+### Domain Settings
 ```typescript
-export class CustomAuthorParser extends BaseMetadataParser {
-  parse($: CheerioAPI): string | null {
-    // Extract author information
-    return (
-      $('meta[name="author"]').attr('content') ||
-      $('.author-name').text().trim() ||
-      $('.byline').text().replace('By', '').trim() ||
-      null
-    );
-  }
+{
+  url: 'example.com',
+  rateLimit: 60,  // requests per minute
+  priority: 1,
+  segmentSize: 5000
 }
 ```
 
 ## Error Handling
 
-The system includes comprehensive error handling:
+### System Level
+- Database connectivity
+- Redis availability
+- Worker health
+- File system status
 
-1. **Fetchers**
-   - Network failures with retries
-   - 404 handling (no retries)
-   - Timeout management
-   - Redirect handling
+### Process Level
+- Network failures
+- Parse errors
+- Timeout handling
+- Rate limiting
 
-2. **Page Parsers**
-   - Missing metadata fields
-   - Invalid page structure
-   - Metadata assembly errors
-   - Field validation
-
-3. **Metadata Parsers**
-   - Missing content
-   - Invalid field formats
-   - Data cleaning errors
-   - Fallback handling
-
-4. **URL Discovery**
-   - Invalid XML handling
-   - Network failures
-   - Malformed URLs
-   - Nested sitemap errors
-
-## Project Structure
-
+## File Structure
 ```
-src/
-├── fetcher/              # URL matching and HTTP
-│   ├── BaseFetcher.ts   # Base fetching logic
-│   └── types.ts         # Fetcher interfaces
-├── parsers/             # Content extraction
-│   ├── metadata/        # Type-specific parsers
-│   └── page/           # Page-level parsers
-└── sitemap/            # URL discovery
-    └── SiteURLService.ts # URL processing
+/data/
+  ├── current/          # Live files
+  │   ├── domain1/
+  │   │   ├── llms.txt
+  │   │   ├── segment-1.md
+  │   │   └── segment-2.md
+  │   └── domain2/
+  ├── temp/            # Processing
+  └── archive/         # Old versions
 ```
 
-## Installation
+## Getting Started
 
+### Prerequisites
+- Node.js 16+
+- PostgreSQL 12+
+- Redis 6+
+
+### Installation
 ```bash
 npm install
 ```
 
-## Development
+### Configuration
+1. Set up database connection
+2. Configure Redis
+3. Add domain settings
+4. Set up schedules
 
+### Running
 ```bash
-# Build the project
-npm run build
+# Start master server
+npm run start:master
 
-# Run tests
-npm test
-
-# Run linter
-npm run lint
+# Start worker
+npm run start:worker
 ```
+
+## Monitoring
+
+### System Metrics
+- Active workers
+- Processing rates
+- Error rates
+- Task durations
+
+### Health Checks
+- Worker status
+- Task progress
+- Resource usage
+- Error tracking
 
 ## License
 
