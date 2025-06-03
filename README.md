@@ -172,23 +172,112 @@ Page parsers coordinate the extraction of different types of metadata:
 - Date
 - Author
 
-#### Creating a Custom Page Parser
+#### Metadata Parser Types
+
+The system includes specialized parsers for each type of metadata:
+
+1. **Title Parser**
+   ```typescript
+   import { DefaultTitleParser } from './parsers/metadata';
+   
+   // Default title parsing strategy:
+   // 1. og:title meta tag
+   // 2. twitter:title meta tag
+   // 3. <title> tag
+   // 4. <h1> tag
+   const titleParser = new DefaultTitleParser();
+   const title = titleParser.parse($); // $ is a Cheerio instance
+   ```
+
+2. **Description Parser**
+   ```typescript
+   import { DefaultDescriptionParser } from './parsers/metadata';
+   
+   // Default description parsing strategy:
+   // 1. og:description meta tag
+   // 2. twitter:description meta tag
+   // 3. description meta tag
+   // 4. First paragraph text
+   const descParser = new DefaultDescriptionParser();
+   const description = descParser.parse($);
+   ```
+
+3. **Date Parser**
+   ```typescript
+   import { DefaultDateParser } from './parsers/metadata';
+   
+   // Default date parsing strategy:
+   // 1. article:published_time meta tag
+   // 2. datePublished meta tag
+   // 3. pubDate meta tag
+   // 4. date in URL pattern
+   const dateParser = new DefaultDateParser();
+   const publishDate = dateParser.parse($);
+   ```
+
+4. **Author Parser**
+   ```typescript
+   import { DefaultAuthorParser } from './parsers/metadata';
+   
+   // Default author parsing strategy:
+   // 1. article:author meta tag
+   // 2. author meta tag
+   // 3. byline class/element
+   // 4. author schema markup
+   const authorParser = new DefaultAuthorParser();
+   const author = authorParser.parse($);
+   ```
+
+#### Creating Custom Metadata Parsers
+
+You can create custom parsers for specific sites or metadata types:
 
 ```typescript
-import { BasePageParser } from './parsers/page/BasePageParser';
-import { 
-  CustomTitleParser,
-  CustomDescriptionParser,
-  CustomDateParser,
-  CustomAuthorParser
-} from './parsers/metadata';
+import { BaseMetadataParser } from './parsers/metadata/base';
+import { CheerioAPI } from 'cheerio';
 
-export class CustomParser extends BasePageParser {
+export class CustomTitleParser extends BaseMetadataParser {
+  parse($: CheerioAPI): string | null {
+    // Custom parsing logic
+    const customTitle = $('.my-site-title').text().trim();
+    if (customTitle) return customTitle;
+
+    // Fall back to default parsing if needed
+    return super.parse($);
+  }
+}
+```
+
+#### Combining Parsers
+
+The DefaultParser combines all metadata parsers:
+
+```typescript
+import { DefaultParser } from './parsers/page';
+
+const parser = new DefaultParser();
+const metadata = parser.parseMetadata($);
+// Returns: {
+//   title: string | null,
+//   description: string | null,
+//   date: string | null,
+//   author: string | null
+// }
+```
+
+#### Parser Priority System
+
+Parsers use a priority system to determine which one handles a specific URL:
+
+```typescript
+export class CustomSiteParser extends BasePageParser {
   constructor() {
     super({
-      name: 'CustomParser',
+      name: 'CustomSiteParser',
+      urlPatterns: ['^https?://mysite\\.com/.*'],
+      priority: 100, // Higher priority than DefaultParser (0)
       metadataParsers: {
-        title: CustomTitleParser,       // Your custom parsers
+        title: CustomTitleParser,
         description: CustomDescriptionParser,
         date: CustomDateParser,
         author: CustomAuthorParser
@@ -197,6 +286,219 @@ export class CustomParser extends BasePageParser {
   }
 }
 ```
+
+#### Customizing Parsers
+
+There are several ways to customize the parsing behavior:
+
+1. **Site-Specific Parser**
+```typescript
+import { BasePageParser } from './parsers/page/BasePageParser';
+import { CheerioAPI } from 'cheerio';
+
+export class MediumParser extends BasePageParser {
+  constructor() {
+    super({
+      name: 'MediumParser',
+      urlPatterns: [
+        '^https?://medium\\.com/.*',
+        '^https?://.*\\.medium\\.com/.*'
+      ],
+      priority: 100,
+      metadataParsers: {
+        title: MediumTitleParser,
+        description: MediumDescriptionParser,
+        date: MediumDateParser,
+        author: MediumAuthorParser
+      }
+    });
+  }
+
+  // Optional: Override the main parse method for complete control
+  parseMetadata($: CheerioAPI) {
+    const metadata = super.parseMetadata($);
+    // Add Medium-specific metadata
+    return {
+      ...metadata,
+      readingTime: $('.readingTime').attr('title'),
+      claps: $('.clapCount').text()
+    };
+  }
+}
+```
+
+2. **Custom Metadata Parser with Multiple Strategies**
+```typescript
+import { BaseMetadataParser } from './parsers/metadata/base';
+
+export class CustomTitleParser extends BaseMetadataParser {
+  parse($: CheerioAPI): string | null {
+    // Try multiple strategies in order
+    return (
+      this.parseJsonLd($) ||
+      this.parseCustomMeta($) ||
+      this.parseHeading($) ||
+      super.parse($)  // Fall back to default parser
+    );
+  }
+
+  private parseJsonLd($: CheerioAPI): string | null {
+    try {
+      const jsonLd = $('script[type="application/ld+json"]').first().text();
+      const data = JSON.parse(jsonLd);
+      return data.headline || data.name || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private parseCustomMeta($: CheerioAPI): string | null {
+    return $('meta[property="custom:title"]').attr('content') || null;
+  }
+
+  private parseHeading($: CheerioAPI): string | null {
+    // Look for specific heading classes
+    return $('.article-heading, .post-title').first().text().trim() || null;
+  }
+}
+```
+
+3. **Date Parser with Custom Format**
+```typescript
+export class CustomDateParser extends BaseMetadataParser {
+  parse($: CheerioAPI): string | null {
+    // Try multiple date formats and sources
+    const dateStr = 
+      $('meta[name="article:published_time"]').attr('content') ||
+      $('time[datetime]').attr('datetime') ||
+      $('.publish-date').text();
+
+    if (!dateStr) return null;
+
+    try {
+      // Handle different date formats
+      const date = this.parseDate(dateStr);
+      return date ? date.toISOString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private parseDate(dateStr: string): Date | null {
+    // Try different date formats
+    const formats = [
+      'YYYY-MM-DD',
+      'MM/DD/YYYY',
+      'MMMM DD, YYYY',
+      'DD MMMM YYYY'
+    ];
+
+    for (const format of formats) {
+      try {
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) return date;
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+}
+```
+
+4. **Author Parser with Social Media Links**
+```typescript
+export class EnhancedAuthorParser extends BaseMetadataParser {
+  parse($: CheerioAPI): AuthorMetadata | null {
+    const name = this.parseAuthorName($);
+    if (!name) return null;
+
+    return {
+      name,
+      ...this.parseAuthorLinks($),
+      ...this.parseAuthorBio($)
+    };
+  }
+
+  private parseAuthorName($: CheerioAPI): string | null {
+    return (
+      $('meta[name="author"]').attr('content') ||
+      $('.author-name').text().trim() ||
+      $('.byline').text().replace('By', '').trim() ||
+      null
+    );
+  }
+
+  private parseAuthorLinks($: CheerioAPI) {
+    return {
+      twitter: $('.author-twitter').attr('href'),
+      linkedin: $('.author-linkedin').attr('href'),
+      email: $('.author-email').attr('href')?.replace('mailto:', '')
+    };
+  }
+
+  private parseAuthorBio($: CheerioAPI) {
+    return {
+      bio: $('.author-bio').text().trim(),
+      avatar: $('.author-avatar').attr('src')
+    };
+  }
+}
+```
+
+5. **Description Parser with Length Control**
+```typescript
+export class CustomDescriptionParser extends BaseMetadataParser {
+  constructor(private maxLength: number = 200) {
+    super();
+  }
+
+  parse($: CheerioAPI): string | null {
+    let description = 
+      $('meta[property="og:description"]').attr('content') ||
+      $('meta[name="description"]').attr('content') ||
+      this.generateFromContent($);
+
+    if (!description) return null;
+
+    // Clean and truncate
+    return this.formatDescription(description);
+  }
+
+  private generateFromContent($: CheerioAPI): string | null {
+    // Generate from first paragraph or content
+    const content = $('.article-content p').first().text().trim() ||
+                   $('.content-body').first().text().trim();
+    
+    return content || null;
+  }
+
+  private formatDescription(text: string): string {
+    // Clean the text
+    let cleaned = text
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Truncate to maxLength while keeping whole words
+    if (cleaned.length > this.maxLength) {
+      cleaned = cleaned.substr(0, this.maxLength);
+      cleaned = cleaned.substr(0, cleaned.lastIndexOf(' ')) + '...';
+    }
+
+    return cleaned;
+  }
+}
+```
+
+These examples show different approaches to customizing parsers:
+- Site-specific parsing rules
+- Multiple parsing strategies with fallbacks
+- Custom metadata fields
+- Enhanced metadata with additional information
+- Content cleaning and formatting
+- Error handling and validation
+- Format standardization
 
 ## URL Pattern Matching
 
