@@ -1,32 +1,34 @@
+import { SiteURLService } from './sitemap/SiteURLService';
 import { FetcherService } from './fetcher/FetcherService';
 
-async function testFetcher() {
-  const service = new FetcherService();
-
+async function testSitemap() {
   try {
-    // Test with different URLs
-    const urls = [
-      'https://broadbandnow.com/ATT-deals'
-    ];
+    // Initialize services
+    const urlService = new SiteURLService();
+    const fetcherService = new FetcherService();
 
-    console.log('Testing metadata fetching...\n');
+    console.log('Fetching content URLs...');
+    const urls = await urlService.getSiteURLs('theseniorlist.com');
+    console.log(`\nFound ${urls.length} content URLs`);
 
-    for (const url of urls) {
-      console.log(`Fetching metadata for: ${url}`);
+    // Take first 5 URLs for testing
+    const urlsToProcess = urls.slice(0, 5);
+    console.log(`\nProcessing ${urlsToProcess.length} URLs for metadata:\n`);
+
+    // Process each URL
+    for (const { url } of urlsToProcess) {
       try {
-        const metadata = await service.getMetadata(url);
-        console.log('Success! Metadata:', JSON.stringify(metadata, null, 2));
-      } catch (error: any) {
-        console.error('Failed:', error?.message || 'Unknown error');
+        console.log(`\nFetching metadata for: ${url}`);
+        const metadata = await fetcherService.getMetadata(url);
+        console.log('Metadata:', JSON.stringify(metadata, null, 2));
+      } catch (error) {
+        console.error(`Failed to process ${url}:`, error instanceof Error ? error.message : error);
       }
-      console.log('-------------------\n');
     }
-
-  } catch (error: any) {
-    console.error('Test failed:', error?.message || 'Unknown error');
+  } catch (error) {
+    console.error('Test failed:', error);
   }
 }
 
 // Run the test
-console.log('Starting metadata fetcher test...\n');
-testFetcher().then(() => console.log('Test completed!')); 
+testSitemap().catch(console.error); 

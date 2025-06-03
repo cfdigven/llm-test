@@ -10,8 +10,10 @@
     "lint": "eslint src/**/*.ts"
   },
   "dependencies": {
+    "@types/xml2js": "^0.4.14",
     "axios": "^1.6.0",
-    "cheerio": "^1.0.0-rc.12"
+    "cheerio": "^1.0.0-rc.12",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -22,4 +24,4 @@
     "ts-jest": "^29.0.0",
     "typescript": "^5.0.0"
   }
-} 
+}

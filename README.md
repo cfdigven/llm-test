@@ -1,6 +1,6 @@
 # Web Page Metadata Parser
 
-A flexible and extensible system for fetching and parsing metadata from web pages. The system uses a modular architecture with customizable fetchers and parsers.
+A flexible and extensible system for discovering, fetching, and parsing metadata from web pages. The system uses a modular architecture with customizable fetchers, parsers, and URL discovery.
 
 ## Features
 
@@ -8,14 +8,124 @@ A flexible and extensible system for fetching and parsing metadata from web page
 - 🔄 Configurable retry and timeout mechanisms
 - 🎨 Customizable parsers for different metadata types
 - 🔍 Full URL and path matching support
-- ⚡ Priority-based fetcher selection
+- ⚡ Priority-based component selection
 - 🛡️ Built-in error handling and fallbacks
+- 🗺️ Intelligent sitemap discovery and processing
+- 🌲 Support for nested sitemaps and indexes
+
+## Quick Start
+
+The system comes with a built-in test that demonstrates the full pipeline of URL discovery and metadata parsing:
+
+```typescript
+import { SiteURLService } from './sitemap/SiteURLService';
+import { FetcherService } from './fetcher/FetcherService';
+
+async function testSitemap() {
+  try {
+    // Initialize services
+    const urlService = new SiteURLService();
+    const fetcherService = new FetcherService();
+
+    // Discover URLs from sitemap
+    console.log('Fetching content URLs...');
+    const urls = await urlService.getSiteURLs('theseniorlist.com');
+    console.log(`\nFound ${urls.length} content URLs`);
+
+    // Process a subset of URLs
+    const urlsToProcess = urls.slice(0, 5);
+    console.log(`\nProcessing ${urlsToProcess.length} URLs for metadata:\n`);
+
+    // Extract metadata from each URL
+    for (const { url } of urlsToProcess) {
+      try {
+        console.log(`\nFetching metadata for: ${url}`);
+        const metadata = await fetcherService.getMetadata(url);
+        console.log('Metadata:', JSON.stringify(metadata, null, 2));
+      } catch (error) {
+        console.error(`Failed to process ${url}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Test failed:', error);
+  }
+}
+```
+
+This test demonstrates:
+1. URL Discovery: Using sitemaps to find all content URLs
+2. Metadata Extraction: Fetching and parsing each page for:
+   - Title
+   - Description
+   - Author
+   - Publication Date
+3. Error Handling: Graceful handling of failed requests or parsing
+4. Modular Design: Using separate services for URL discovery and metadata fetching
+
+Run the test with:
+```bash
+npx ts-node src/index.ts
+```
 
 ## Architecture
 
-The system is built around three main customizable components:
+The system is built around three main components:
 
-### 1. Fetchers
+### 1. URL Discovery
+
+The URL discovery system finds all relevant URLs on a site using:
+- Sitemap.xml files
+- Sitemap index files
+- Nested sitemaps within regular sitemaps
+
+#### Using the URL Discovery System
+
+```typescript
+import { SiteURLService } from './sitemap/SiteURLService';
+
+const urlService = new SiteURLService();
+const urls = await urlService.getSiteURLs('example.com');
+
+console.log(urls);
+// [
+//   {
+//     url: 'https://example.com/article1',
+//     lastmod: '2024-03-21',
+//     priority: 0.8
+//   },
+//   // ... more URLs
+// ]
+```
+
+#### Creating a Custom URL Loader
+
+```typescript
+import { BaseURLLoader } from './sitemap/BaseURLLoader';
+import { SiteURL } from './sitemap/types';
+
+export class CustomURLLoader extends BaseURLLoader {
+  constructor() {
+    super({
+      name: 'CustomURLLoader',
+      urlPatterns: [
+        '^https?://custom\\.com/.*',
+        '^https?://www\\.custom\\.com/.*'
+      ],
+      priority: 100
+    });
+  }
+
+  protected filterURLs(urls: SiteURL[]): SiteURL[] {
+    // Only include article URLs
+    return urls.filter(url => 
+      url.url.includes('/articles/') || 
+      url.url.includes('/blog/')
+    );
+  }
+}
+```
+
+### 2. Fetchers
 
 Fetchers are responsible for:
 - Matching URLs using regex patterns
@@ -54,7 +164,7 @@ export class CustomSiteFetcher extends BaseFetcher {
 }
 ```
 
-### 2. Page Parsers
+### 3. Parsers
 
 Page parsers coordinate the extraction of different types of metadata:
 - Title
@@ -88,134 +198,77 @@ export class CustomParser extends BasePageParser {
 }
 ```
 
-### 3. Metadata Parsers
-
-Each type of metadata can have its own custom parser:
-
-#### Custom Title Parser
-```typescript
-import { BaseMetadataParser } from './parsers/metadata/BaseMetadataParser';
-import { CheerioAPI } from 'cheerio';
-
-export class CustomTitleParser extends BaseMetadataParser {
-  parse($: CheerioAPI): string {
-    // Try multiple selectors in order of preference
-    return (
-      $('.article-title').text() ||
-      $('meta[property="og:title"]').attr('content') ||
-      $('h1').first().text() ||
-      'Default Title'
-    );
-  }
-}
-```
-
-#### Custom Date Parser
-```typescript
-export class CustomDateParser extends BaseMetadataParser {
-  parse($: CheerioAPI): string {
-    const dateText = $('.publish-date').text();
-    // Custom date format parsing
-    return this.parseCustomDateFormat(dateText);
-  }
-
-  private parseCustomDateFormat(dateText: string): string {
-    // Your custom date parsing logic
-    return new Date(dateText).toISOString();
-  }
-}
-```
-
 ## URL Pattern Matching
 
-The system supports flexible URL matching:
+Both URL discovery and fetching support flexible pattern matching:
 
 ```typescript
 urlPatterns: [
-  // Match exact domains
+  // Exact domains
   '^https?://example\\.com/.*',
   
-  // Match subdomains
+  // Subdomains
   '^https?://.*\\.example\\.com/.*',
   
-  // Match specific paths
+  // Specific paths
   '.*/articles/\\d+$',
   '.*/posts/[a-z0-9-]+$',
   
-  // Match query parameters
-  '.*\\?category=tech.*',
-  
-  // Match file types
-  '.*\\.(pdf|doc)$'
+  // Query parameters
+  '.*\\?category=tech.*'
 ]
 ```
 
-## Priority System
-
-Fetchers use a priority system to determine which one handles a URL:
+## Complete Usage Example
 
 ```typescript
-// High priority for exact matches
-{
-  name: 'ExactMatchFetcher',
-  urlPatterns: ['^https?://exact\\.com/specific-page$'],
-  priority: 100
-}
-
-// Medium priority for sections
-{
-  name: 'SectionFetcher',
-  urlPatterns: ['^https?://exact\\.com/section/.*'],
-  priority: 50
-}
-
-// Lowest priority for fallback
-{
-  name: 'DefaultFetcher',
-  urlPatterns: ['.*'],
-  priority: 0
-}
-```
-
-## Basic Usage
-
-```typescript
+import { SiteURLService } from './sitemap/SiteURLService';
 import { FetcherService } from './fetcher/FetcherService';
 
-const fetcherService = new FetcherService();
-const metadata = await fetcherService.getMetadata('https://example.com/article');
+async function processWebsite(domain: string) {
+  // 1. Discover URLs
+  const urlService = new SiteURLService();
+  const urls = await urlService.getSiteURLs(domain);
+  
+  // 2. Fetch and parse each URL
+  const fetcherService = new FetcherService();
+  
+  for (const { url } of urls) {
+    try {
+      const metadata = await fetcherService.getMetadata(url);
+      console.log(`Processed ${url}:`, metadata);
+    } catch (error) {
+      console.error(`Failed to process ${url}:`, error);
+    }
+  }
+}
 
-console.log(metadata);
-// {
-//   url: 'https://example.com/article',
-//   title: 'Article Title',
-//   description: 'Article description...',
-//   date: '2024-03-21',
-//   author: 'John Doe'
-// }
+// Use the system
+await processWebsite('example.com');
 ```
 
 ## Error Handling
 
-The system includes built-in error handling for:
+The system includes comprehensive error handling for:
 - Network failures (with configurable retries)
-- Invalid URLs
+- Invalid URLs or sitemaps
 - Parsing failures
 - 404 errors (no retries)
+- Malformed sitemap XML
+- Nested sitemap processing failures
 
 ## Project Structure
 
 ```
 src/
-├── parsers/
-│   ├── metadata/           # Metadata-specific parsers
-│   │   ├── title/         # Title parsers
-│   │   ├── description/   # Description parsers
-│   │   ├── date/         # Date parsers
-│   │   └── author/       # Author parsers
-│   └── page/             # Page parsers
-├── fetcher/              # Fetcher components
-└── index.ts             # Main entry point
+├── fetcher/              # Fetching components
+├── parsers/              # Metadata parsers
+│   ├── metadata/         # Type-specific parsers
+│   └── page/            # Page-level parsers
+└── sitemap/             # URL discovery
+    ├── types.ts         # URL discovery types
+    ├── BaseURLLoader.ts # Base sitemap processor
+    └── loaders/         # Site-specific loaders
 ```
 
 ## Installation
