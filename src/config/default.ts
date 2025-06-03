@@ -10,7 +10,7 @@ const config: SystemConfig = {
   
   domains: [
     {
-      domain: 'example.com',
+      domain: 'theseniorlist.com',
       priority: 1,
       segmentSize: 5000
     }
