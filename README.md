@@ -24,17 +24,17 @@ The system follows a clean separation of concerns with three main components:
 - Filters content URLs
 
 ### 2. Fetchers (FetcherService)
-- URL pattern matching
-- Priority-based selection
+- URL pattern matching and routing
+- Site-specific configuration
 - HTTP request handling
 - Retry mechanisms
 - Parser selection and instantiation
 
 ### 3. Parsers
-- Pure content extraction
-- No URL matching or routing
-- Specialized metadata parsers
+- HTML content extraction
+- Metadata field parsing
 - Fallback strategies
+- Type-specific parsing logic
 
 This separation allows:
 - Independent testing of each component
@@ -79,15 +79,13 @@ export class CustomSiteFetcher extends BaseFetcher {
   constructor() {
     super({
       name: 'CustomSiteFetcher',
-      urlPatterns: ['^https?://site\\.com/.*'],
-      priority: 100,
-      parser: CustomParser,
+      urlPatterns: ['^https?://site\\.com/.*'],  // URL routing pattern
+      priority: 100,                             // Higher priority than default
+      parser: CustomParser,                      // Parser to use
       defaultConfig: {
         retries: 3,
         timeout: 10000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0'
-        }
+        headers: { 'User-Agent': 'Mozilla/5.0' }
       }
     });
   }
@@ -96,7 +94,7 @@ export class CustomSiteFetcher extends BaseFetcher {
 
 ### 2. Parsers
 
-Parsers focus solely on content extraction:
+Parsers handle HTML content extraction:
 
 ```typescript
 export class CustomParser extends BasePageParser {
@@ -126,11 +124,12 @@ export class CustomParser extends BasePageParser {
 
 ### 3. Metadata Parsers
 
-Specialized parsers for each metadata type:
+Each metadata parser focuses on extracting a specific type of content:
 
 ```typescript
 export class CustomTitleParser extends BaseMetadataParser {
   parse($: CheerioAPI): string | null {
+    // Extract title using multiple strategies
     return (
       $('meta[property="og:title"]').attr('content') ||
       $('title').text().trim() ||
