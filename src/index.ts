@@ -1,34 +1,35 @@
-import { SiteURLService } from './sitemap/SiteURLService';
-import { FetcherService } from './fetcher/FetcherService';
+import { MasterServer } from './server/MasterServer';
+import config from './config/default';
 
-async function testSitemap() {
+async function main() {
+  const server = new MasterServer(config);
+
   try {
-    // Initialize services
-    const urlService = new SiteURLService();
-    const fetcherService = new FetcherService();
+    // Initialize the server
+    await server.initialize();
+    console.log('Server initialized successfully');
 
-    console.log('Fetching content URLs...');
-    const urls = await urlService.getSiteURLs('theseniorlist.com');
-    console.log(`\nFound ${urls.length} content URLs`);
+    // Start the server
+    await server.start();
+    console.log('Server started successfully');
 
-    // Take first 5 URLs for testing
-    const urlsToProcess = urls.slice(0, 5);
-    console.log(`\nProcessing ${urlsToProcess.length} URLs for metadata:\n`);
+    // Handle graceful shutdown
+    process.on('SIGTERM', async () => {
+      console.log('Received SIGTERM signal');
+      await server.stop();
+      process.exit(0);
+    });
 
-    // Process each URL
-    for (const { url } of urlsToProcess) {
-      try {
-        console.log(`\nFetching metadata for: ${url}`);
-        const metadata = await fetcherService.getMetadata(url);
-        console.log('Metadata:', JSON.stringify(metadata, null, 2));
-      } catch (error) {
-        console.error(`Failed to process ${url}:`, error instanceof Error ? error.message : error);
-      }
-    }
+    process.on('SIGINT', async () => {
+      console.log('Received SIGINT signal');
+      await server.stop();
+      process.exit(0);
+    });
+
   } catch (error) {
-    console.error('Test failed:', error);
+    console.error('Failed to start server:', error);
+    process.exit(1);
   }
 }
 
-// Run the test
-testSitemap().catch(console.error); 
+main(); 
