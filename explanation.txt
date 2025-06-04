@@ -1,0 +1,216 @@
+Current Implementation:
+
+Master Process Tasks:
+1. URL Discovery:
+   - Fetches sitemaps from configured domains
+   - Handles both sitemap index and individual sitemaps
+   - Extracts URLs
+   - Deduplicates URLs before storage
+   - Stores in postgres with status='new'
+
+2. URL Distribution:
+   - Queries URLs with status='new'
+   - Matches URLs against worker patterns
+   - Groups into batches based on worker config
+   - Assigns worker_id and batch_id
+   - Updates URL status for tracking
+
+3. Processing Coordination:
+   - Sets metadata_extraction_status in Redis
+   - Monitors worker heartbeats
+   - Handles worker timeouts (10min threshold)
+   - Reassigns failed batches
+   - Tracks overall progress
+
+4. File Generation (WIP):
+   - Groups processed URLs by domain
+   - Creates output files in segments
+
+Worker Process Flow:
+1. Startup:
+   - Claims available worker slot in DB
+   - Initializes processing queue
+   - Sets up concurrency limits
+
+2. Batch Processing:
+   - Claims single unprocessed batch
+   - Updates URL statuses to 'processing'
+   - Fetches pages concurrently (configured limits)
+   - Extracts metadata:
+     * Title
+     * Description
+     * Author
+     * Date
+   - Saves results to metadata table
+   - Updates URL status to 'done'
+
+3. Cleanup:
+   - Marks batch as completed
+   - Updates worker status
+   - Closes connections
+   - Exits cleanly
+
+Database Schema (core tables):
+
+urls:
+  - id: uuid
+  - url: text
+  - domain: text
+  - status: enum
+  - worker_id: uuid
+  - batch_id: uuid
+  - priority: int
+  - retries: int
+
+workers:
+  - id: uuid
+  - type: text
+  - status: enum
+  - last_heartbeat: timestamp
+  - urls_processed: int
+  - current_batch_id: uuid
+
+metadata:
+  - url_id: uuid
+  - title: text
+  - description: text
+  - author: text
+  - date: timestamp
+
+Configuration Layers:
+
+1. Worker Pattern Matching:
+
+// Define different worker types for different content
+const workers = [
+  {
+    name: 'blog-worker',
+    // Match multiple URL patterns
+    urlPatterns: [
+      '^/blog/.*',
+      '^/news/.*',
+      '^/articles/.*'
+    ],
+    // Larger batches for blog content
+    batchSize: 500,
+    // Higher concurrency for simple pages
+    concurrency: 5,
+    // Run multiple instances
+    instances: 2
+  },
+  {
+    name: 'product-worker',
+    urlPatterns: ['^/products/.*'],
+    // Smaller batches for complex pages
+    batchSize: 100,
+    // Lower concurrency for heavy pages
+    concurrency: 2,
+    instances: 3
+  },
+  {
+    name: 'default-worker',
+    // Catch all remaining URLs
+    urlPatterns: ['.*'],
+    batchSize: 200,
+    concurrency: 3,
+    instances: 1
+  }
+]
+
+2. Metadata Extraction Rules:
+// Configure how to extract metadata based on URL patterns
+const metadataRules = {
+  // Blog posts metadata
+  '^/blog/.*': {
+    title: [
+      'meta[property="og:title"]',
+      'h1.post-title',
+      'h1:first-child'
+    ],
+    description: [
+      'meta[property="og:description"]',
+      '.post-excerpt',
+      'p:first-of-type'
+    ],
+    author: [
+      '.author-name',
+      'meta[name="author"]'
+    ],
+    date: [
+      'meta[property="article:published_time"]',
+      'time[datetime]',
+      '.post-date'
+    ]
+  },
+  // Product pages metadata
+  '^/products/.*': {
+    title: [
+      'h1.product-title',
+      'meta[property="product:title"]'
+    ],
+    description: [
+      '.product-description',
+      'meta[property="product:description"]'
+    ],
+    price: [
+      '.product-price',
+      'meta[property="product:price:amount"]'
+    ]
+  }
+}
+
+3. Domain-Specific Settings:
+
+const domainConfig = {
+  'blog-site.com': {
+    priority: 1,
+    // Rate limiting
+    rateLimit: {
+      requestsPerMinute: 60,
+      concurrent: 5
+    },
+    // Retry strategy
+    retry: {
+      maxAttempts: 3,
+      backoffFactor: 2,
+      initialDelay: 1000
+    },
+    // Custom metadata rules
+    metadata: {
+      title: '.custom-title-class',
+      author: '#author-bio h3'
+    }
+  }
+}
+
+How URL Processing Works:
+
+1. Pattern Matching:
+- URL comes in: 'https://example.com/blog/post-1'
+- System checks against worker patterns
+- Matches '^/blog/.*' pattern
+- Assigns to blog-worker
+- Uses blog worker's batch/concurrency settings
+
+2. Metadata Extraction:
+- Worker fetches the page
+- Looks up metadata rules for URL pattern
+- Tries selectors in order until match found
+- Falls back to default rules if no match
+- Can be overridden by domain-specific rules
+
+3. Resource Management:
+- Each worker type has its own:
+  * Batch size (how many URLs per batch)
+  * Concurrency (parallel requests)
+  * Instance count (parallel workers)
+- Settings optimized for content type:
+  * Blog posts: larger batches, higher concurrency
+  * Products: smaller batches, lower concurrency
+  * Default: moderate settings
+
+4. Extensibility:
+- Add new worker types for new patterns
+- Define custom metadata rules
+- Set domain-specific overrides
+- Configure resource usage per type
