@@ -1,201 +1,163 @@
-# Web Content Processing System
+# Distributed Web Content Processing System
 
-A distributed system for discovering, fetching, and parsing metadata from web pages at scale. The system uses a master-worker architecture for processing multiple domains efficiently and reliably.
+## Overview
+This system is designed to efficiently process and extract metadata from web content at scale using a distributed master-worker architecture. It handles URL discovery, distribution, and parallel processing across multiple worker instances, with support for different worker types specialized for specific content patterns.
 
-## System Architecture
+## Architecture
 
-### Master Server
-- Coordinates all processing tasks
-- Hosts PostgreSQL database and Redis cache
-- Manages file generation and scheduling
-- Handles system recovery and monitoring
+### System Components
 
-### Worker Servers
-- Process URLs in parallel
+#### 1. Master Server
+The master server is responsible for:
+- Managing the overall workflow through task orchestration
+- URL discovery from configured domains
+- Distribution of URLs to appropriate workers
+- Monitoring worker health and status
+- Cleanup and maintenance operations
+
+#### 2. Worker Servers
+Workers are specialized processes that:
+- Handle specific URL patterns (blog posts, product pages, etc.)
+- Process URLs in batches with configurable concurrency
 - Extract metadata from web pages
-- Handle rate limiting and retries
-- Report progress to master
+- Report progress and health status through heartbeats
 
-## Core Features
+#### 3. Storage Layer
+- **PostgreSQL Database**: Stores URLs, metadata, worker states, and task information
+- **Redis**: Handles real-time coordination and status sharing between master and workers
 
-### 1. URL Discovery
-- 🔍 Smart sitemap processing
-- 🌲 Support for nested sitemaps
-- 🎯 Domain-specific URL patterns
-- 🚦 Automatic rate limiting
+### Workflow
 
-### 2. Content Processing
-- 📄 Flexible metadata extraction
-- 🎨 Site-specific parsing rules
-- 🔄 Retry and fallback strategies
-- ⚡ Parallel processing
+#### 1. URL Discovery
+- Master server fetches URLs from configured domain sitemaps
+- URLs are deduplicated and stored in the database
+- Each URL is assigned a priority based on domain and worker configurations
 
-### 3. File Generation
-- 📁 Segmented file creation
-- 🔄 Atomic file updates
-- 📚 Version management
-- 🗄️ Automatic archiving
+#### 2. URL Distribution
+- URLs are distributed to workers based on pattern matching
+- Each worker type has specific URL patterns it handles (e.g., blog posts, product pages)
+- URLs are grouped into batches for efficient processing
+- Workers are created and assigned batches based on configuration
 
-### 4. System Management
-- ⏰ Configurable scheduling
-- 💪 Fault tolerance
-- 📊 Progress monitoring
-- 🛠️ Automatic recovery
+#### 3. Metadata Extraction
+- Workers claim batches of URLs for processing
+- Each worker processes exactly one batch at a time
+- Concurrent processing within each worker based on configuration
+- Extracted metadata is stored in the database
+- Workers mark themselves as completed after processing their batch
 
-## Component Details
+### Worker Lifecycle
 
-### 1. URL Discovery Service
-```typescript
-// Finds and processes URLs from domains
-class SiteURLService {
-  async getSiteURLs(domain: string): Promise<URL[]> {
-    // Process sitemaps
-    // Handle nested indexes
-    // Filter content URLs
-    // Return discovered URLs
-  }
-}
-```
+1. **Initialization**
+   - Worker claims an available worker slot
+   - Establishes database and Redis connections
+   - Initializes processing queue with configured concurrency
 
-### 2. Content Processing
-```typescript
-// Handles metadata extraction
-class PageParser {
-  parseMetadata($: CheerioAPI): PageMetadata {
-    return {
-      title: this.titleParser.parse($),
-      description: this.descriptionParser.parse($),
-      date: this.dateParser.parse($),
-      author: this.authorParser.parse($)
-    };
-  }
-}
-```
+2. **Batch Processing**
+   - Claims a single unprocessed batch
+   - Processes URLs concurrently within the batch
+   - Updates URL status (new → processing → done/failed)
+   - Sends regular heartbeats to indicate health
 
-### 3. Metadata Parsers
-Each parser specializes in extracting specific content:
+3. **Completion**
+   - Marks batch as completed
+   - Updates own status to 'completed'
+   - Performs cleanup and disconnects
 
-#### Title Parser
-```typescript
-class TitleParser extends BaseMetadataParser {
-  parse($: CheerioAPI): string | null {
-    return (
-      $('meta[property="og:title"]').attr('content') ||
-      $('title').text().trim() ||
-      $('h1').first().text().trim() ||
-      null
-    );
-  }
-}
-```
+### Health Monitoring
 
-#### Description Parser
-```typescript
-class DescriptionParser extends BaseMetadataParser {
-  parse($: CheerioAPI): string | null {
-    return (
-      $('meta[property="og:description"]').attr('content') ||
-      $('meta[name="description"]').attr('content') ||
-      $('p').first().text().trim() ||
-      null
-    );
-  }
-}
-```
-
-## Distributed Processing
-
-### Task Flow
-1. **System Initialization**
-   - Database setup
-   - Table creation
-   - Cache initialization
-
-2. **URL Discovery**
-   - Sitemap processing
-   - URL validation
-   - Storage in database
-
-3. **Content Processing**
-   - Worker batch claiming
-   - Metadata extraction
-   - Result storage
-
-4. **File Generation**
-   - Segment creation
-   - Index generation
-   - File replacement
-
-### Recovery System
-
-#### Worker Recovery
-- Heartbeat monitoring
-- Stale batch detection
-- Automatic retry
-- Progress tracking
-
-#### Task Recovery
-- State verification
-- Resource cleanup
-- Task restart
-- Error handling
+- Workers send heartbeats every 30 seconds
+- Master server monitors worker health
+- Stale workers (no heartbeat for 10 minutes) can be reclaimed
+- Failed URLs are marked for retry
 
 ## Configuration
 
-### Global Settings
+### System Configuration
 ```typescript
 {
   schedule: {
-    type: 'daily',
-    time: '00:00',
+    type: 'weekly',
+    timeOfDay: '00:00',
     timezone: 'UTC'
   },
-  workers: {
-    batchSize: 1000,
-    maxRetries: 3
-  },
-  storage: {
-    retainVersions: 3
-  }
+  
+  domains: [
+    {
+      domain: 'example.com',
+      priority: 1,
+      segmentSize: 5000
+    }
+  ],
+
+  workers: [
+    {
+      name: 'blog-worker',
+      urlPatterns: ['^/blog/.*', '^/articles/.*'],
+      priority: 100,
+      batchSize: 500,
+      concurrency: 5,
+      instances: 2
+    }
+    // Additional worker types...
+  ]
 }
 ```
 
-### Domain Settings
-```typescript
-{
-  url: 'example.com',
-  rateLimit: 60,  // requests per minute
-  priority: 1,
-  segmentSize: 5000
-}
-```
+### Worker Types
+1. **Blog Worker**
+   - Handles blog posts and articles
+   - Higher priority processing
+   - Larger batch sizes
+
+2. **Product Worker**
+   - Processes product and review pages
+   - Medium priority
+   - Moderate batch sizes
+
+3. **Default Worker**
+   - Handles all other URLs
+   - Lowest priority
+   - Smaller batch sizes
 
 ## Error Handling
 
-### System Level
-- Database connectivity
-- Redis availability
-- Worker health
-- File system status
+- Failed URL processing is tracked
+- Workers handle graceful shutdown
+- System supports retry mechanisms
+- Stale worker detection and recovery
 
-### Process Level
-- Network failures
-- Parse errors
-- Timeout handling
-- Rate limiting
+## Scalability
 
-## File Structure
-```
-/data/
-  ├── current/          # Live files
-  │   ├── domain1/
-  │   │   ├── llms.txt
-  │   │   ├── segment-1.md
-  │   │   └── segment-2.md
-  │   └── domain2/
-  ├── temp/            # Processing
-  └── archive/         # Old versions
-```
+The system is designed to scale through:
+- Multiple worker instances per type
+- Configurable batch sizes and concurrency
+- Pattern-based URL distribution
+- Independent worker processes
+
+## Storage Management
+
+- Configurable data retention
+- Separate storage paths for current and archived data
+- Temporary processing directories
+- Version control for extracted data
+
+## Setup and Dependencies
+
+### Prerequisites
+- PostgreSQL database
+- Redis server
+- Node.js environment
+
+### Environment Variables
+- `DB_HOST`: Database host
+- `DB_PORT`: Database port
+- `DB_NAME`: Database name
+- `DB_USER`: Database username
+- `DB_PASSWORD`: Database password
+- `REDIS_HOST`: Redis host
+- `REDIS_PORT`: Redis port
+- `REDIS_PASSWORD`: Redis password (optional)
 
 ## Getting Started
 
