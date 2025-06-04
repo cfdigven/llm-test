@@ -7,11 +7,6 @@ async function main() {
   const server = new MasterServer(config);
 
   try {
-    // Initialize the server first
-    console.log('Initializing server...');
-    await server.initialize();
-    console.log('Server initialized successfully');
-
     // Start the server
     console.log('Starting server...');
     await server.start();
@@ -28,6 +23,8 @@ async function main() {
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
+
+    await shutdown('SIGINT');
 
   } catch (error) {
     console.error('Failed to start server:', error);

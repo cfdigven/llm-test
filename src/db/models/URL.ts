@@ -4,11 +4,12 @@ export class URL extends Model {
   public id!: string;
   public url!: string;
   public domain!: string;
-  public status!: string;
-  public batch_id?: string;
-  public worker_id?: string;
+  public status!: 'new' | 'processing' | 'done' | 'failed';
+  public priority!: number;
   public retries!: number;
-  public worker_heartbeat?: Date;
+  public worker_id?: string;
+  public batch_id?: string;
+  public worker_type?: string;
   public readonly created_at!: Date;
   public readonly updated_at!: Date;
 }
@@ -34,21 +35,26 @@ export function initURLModel(sequelize: Sequelize): void {
       allowNull: false,
       defaultValue: 'new'
     },
-    batch_id: {
-      type: DataTypes.UUID,
-      allowNull: true
-    },
-    worker_id: {
-      type: DataTypes.UUID,
-      allowNull: true
+    priority: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
     },
     retries: {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 0
     },
-    worker_heartbeat: {
-      type: DataTypes.DATE,
+    worker_id: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    batch_id: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    worker_type: {
+      type: DataTypes.STRING,
       allowNull: true
     }
   }, {
@@ -61,7 +67,7 @@ export function initURLModel(sequelize: Sequelize): void {
       { fields: ['domain'] },
       { fields: ['batch_id'] },
       { fields: ['worker_id'] },
-      { fields: ['worker_heartbeat'] }
+      { fields: ['worker_type'] }
     ]
   });
 } 

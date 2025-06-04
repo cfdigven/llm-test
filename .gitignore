@@ -16,6 +16,9 @@ out/
 .vscode/
 *.swp
 *.swo
+*~
+
+# OS files
 .DS_Store
 Thumbs.db
 
@@ -28,11 +31,8 @@ yarn-error.log*
 
 # Environment variables
 .env
-.env.local
-.env.*.local
-.env.development
-.env.test
-.env.production
+.env.*
+!.env.example
 
 # Test coverage
 coverage/
@@ -52,4 +52,8 @@ coverage/
 # .stylelintcache
 
 # Optional: Project specific ignores
-# Add any project-specific files or directories to ignore here 
+# Add any project-specific files or directories to ignore here
+
+# Docker volumes
+docker/data/
+data/ 

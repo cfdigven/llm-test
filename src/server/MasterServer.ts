@@ -1,37 +1,63 @@
-import { Sequelize } from 'sequelize';
+import { Sequelize, DataTypes } from 'sequelize';
 import { initModels } from '../db/models';
 import { SystemConfig } from '../config/types';
-import { Task, URL } from '../db/models';
+import { Task, URL, Worker } from '../db/models';
 import { PREDEFINED_TASKS } from '../config/tasks';
 import { calculateNextRun } from '../utils/schedule';
 import { SiteURLService } from '../sitemap';
 import Redis from 'ioredis';
 import fs from 'fs/promises';
 import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 export class MasterServer {
-  private sequelize: Sequelize;
-  private redis: Redis;
+  private sequelize!: Sequelize;
+  private redis!: Redis;
   private config: SystemConfig;
   private isInitialized: boolean = false;
-  private urlService: SiteURLService;
+  private urlService!: SiteURLService;
 
   constructor(config: SystemConfig) {
     this.config = config;
+  }
+
+  private async initializeConnections() {
+    // First create a maintenance connection to postgres database
+    const maintenanceSequelize = new Sequelize({
+      host: this.config.database.host,
+      port: this.config.database.port,
+      database: 'postgres',
+      username: this.config.database.username,
+      password: this.config.database.password,
+      dialect: 'postgres',
+      logging: false
+    });
+
+    try {
+      // Create database if it doesn't exist
+      await maintenanceSequelize.getQueryInterface().createDatabase(this.config.database.database)
+        .catch(() => {
+          console.log(`Database ${this.config.database.database} already exists`);
+        });
+    } finally {
+      await maintenanceSequelize.close();
+    }
+
+    // Now initialize the main connection to our database
     this.sequelize = new Sequelize({
-      host: config.database.host,
-      port: config.database.port,
-      database: config.database.database,
-      username: config.database.username,
-      password: config.database.password,
+      host: this.config.database.host,
+      port: this.config.database.port,
+      database: this.config.database.database,
+      username: this.config.database.username,
+      password: this.config.database.password,
       dialect: 'postgres',
       logging: false
     });
 
     this.redis = new Redis({
-      host: config.redis.host,
-      port: config.redis.port,
-      password: config.redis.password
+      host: this.config.redis.host,
+      port: this.config.redis.port,
+      password: this.config.redis.password
     });
 
     this.urlService = new SiteURLService();
@@ -79,6 +105,8 @@ export class MasterServer {
 
   async initialize(): Promise<void> {
     try {
+      await this.initializeConnections();
+
       // Test database connection
       await this.sequelize.authenticate();
       console.log('Database connection established successfully.');
@@ -152,6 +180,9 @@ export class MasterServer {
         case 'url_discovery':
           await this.processUrlDiscovery(nextTask);
           break;
+        case 'url_distribution':
+          await this.processUrlDistribution(nextTask);
+          break;
         case 'metadata_extraction':
           await this.processMetadataExtraction(nextTask);
           shouldSetDone = false;
@@ -177,6 +208,8 @@ export class MasterServer {
 
       if (shouldSetDone) {
         nextTask.status = 'done';
+      } else {
+        nextTask.status = 'todo';
       }
     } catch (error) {
       console.error(`Error processing task ${nextTask.type}:`, error);
@@ -198,10 +231,17 @@ export class MasterServer {
         const urls = await this.urlService.getSiteURLs(domainConfig.domain);
         console.log(`Found ${urls.length} URLs for domain ${domainConfig.domain}`);
 
+        // Deduplicate URLs
+        const uniqueUrls = urls.filter((url, index, self) =>
+          index === self.findIndex((u) => u.url === url.url)
+        );
+        console.log(`After deduplication: ${uniqueUrls.length} unique URLs`);
+
         // Batch insert URLs to avoid memory issues with large sites
         const batchSize = 1000;
-        for (let i = 0; i < urls.length; i += batchSize) {
-          const batch = urls.slice(i, i + batchSize).map(siteUrl => ({
+        for (let i = 0; i < uniqueUrls.length; i += batchSize) {
+          const batch = uniqueUrls.slice(i, i + batchSize).map(siteUrl => ({
+            id: uuidv4(),
             url: siteUrl.url,
             domain: domainConfig.domain,
             status: 'new',
@@ -211,11 +251,12 @@ export class MasterServer {
 
           await URL.bulkCreate(batch, {
             updateOnDuplicate: ['priority', 'status', 'updated_at'],
-            returning: false
+            fields: ['id', 'url', 'domain', 'status', 'priority', 'retries'],
+            validate: true
           });
         }
 
-        console.log(`Successfully processed ${urls.length} URLs for ${domainConfig.domain}`);
+        console.log(`Successfully processed ${uniqueUrls.length} URLs for ${domainConfig.domain}`);
       } catch (error) {
         console.error(`Error processing domain ${domainConfig.domain}:`, error);
         // Continue with next domain even if one fails
@@ -223,6 +264,152 @@ export class MasterServer {
     }
 
     console.log('URL discovery completed for all domains');
+  }
+
+  private async processUrlDistribution(task: Task): Promise<void> {
+    console.log('Starting URL distribution to worker batches');
+
+    // Get all unassigned URLs
+    const urls = await URL.findAll({
+      where: {
+        status: 'new',
+        worker_id: null,
+        batch_id: null
+      }
+    });
+
+    if (urls.length === 0) {
+      console.log('No URLs to distribute');
+      return;
+    }
+
+    console.log(`Found ${urls.length} URLs to distribute`);
+
+    // Group URLs by matching worker patterns
+    const workerConfigs = this.config.workers;
+    const urlsByWorker = new Map<string, URL[]>();
+
+    // Initialize map for each worker type
+    workerConfigs.forEach(config => {
+      urlsByWorker.set(config.name, []);
+    });
+
+    // Distribute URLs to workers based on patterns
+    for (const url of urls) {
+      let assigned = false;
+      for (const config of workerConfigs) {
+        // Check if URL matches any of the worker's patterns
+        const matches = config.urlPatterns.some(pattern => {
+          const regex = new RegExp(pattern);
+          return regex.test(url.url);
+        });
+
+        if (matches) {
+          const workerUrls = urlsByWorker.get(config.name) || [];
+          workerUrls.push(url);
+          urlsByWorker.set(config.name, workerUrls);
+          assigned = true;
+          break;
+        }
+      }
+
+      // If no specific worker matched, assign to default worker
+      if (!assigned) {
+        const defaultWorker = workerConfigs.find(w => w.name === 'default-worker');
+        if (defaultWorker) {
+          const defaultUrls = urlsByWorker.get('default-worker') || [];
+          defaultUrls.push(url);
+          urlsByWorker.set('default-worker', defaultUrls);
+        }
+      }
+    }
+
+    // Keep track of active worker IDs
+    const activeWorkerIds = new Set<string>();
+
+    // First, create all worker instances for each type
+    for (const config of workerConfigs) {
+      console.log(`Creating ${config.instances} workers for type ${config.name}`);
+      
+      for (let instance = 1; instance <= config.instances; instance++) {
+        const [worker] = await Worker.findOrCreate({
+          where: {
+            type: config.name,
+            instance_number: instance
+          },
+          defaults: {
+            id: uuidv4(),
+            status: 'idle',
+            urls_processed: 0
+          }
+        });
+        console.log(`Worker ${config.name} #${instance} ready`);
+      }
+    }
+
+    // Now distribute URLs to worker instances and create batches
+    for (const [workerType, workerUrls] of urlsByWorker.entries()) {
+      if (workerUrls.length === 0) continue;
+
+      const config = workerConfigs.find(w => w.name === workerType)!;
+      console.log(`\nProcessing ${workerUrls.length} URLs for ${workerType}`);
+
+      // Get all workers of this type
+      const workers = await Worker.findAll({
+        where: { type: workerType },
+        order: [['instance_number', 'ASC']]
+      });
+
+      // Calculate URLs per worker instance (distribute evenly)
+      const urlsPerWorker = Math.ceil(workerUrls.length / workers.length);
+      console.log(`Distributing ~${urlsPerWorker} URLs per worker instance`);
+
+      // Distribute URLs to worker instances
+      for (let i = 0; i < workers.length; i++) {
+        const worker = workers[i];
+        const start = i * urlsPerWorker;
+        const end = Math.min(start + urlsPerWorker, workerUrls.length);
+        const workerUrlBatch = workerUrls.slice(start, end);
+
+        if (workerUrlBatch.length === 0) continue;
+
+        // Add this worker to active set
+        activeWorkerIds.add(worker.id);
+
+        console.log(`\nWorker ${workerType} #${worker.instance_number} gets ${workerUrlBatch.length} URLs`);
+
+        // Create batches for this worker's URLs
+        for (let j = 0; j < workerUrlBatch.length; j += config.batchSize) {
+          const batchUrls = workerUrlBatch.slice(j, Math.min(j + config.batchSize, workerUrlBatch.length));
+          const batchId = uuidv4();
+
+          await Promise.all(batchUrls.map(url =>
+            url.update({
+              batch_id: batchId,
+              worker_id: worker.id,
+              worker_type: workerType,
+              status: 'new'
+            })
+          ));
+
+          console.log(`Created batch ${batchId} with ${batchUrls.length} URLs for worker ${workerType} #${worker.instance_number}`);
+        }
+      }
+    }
+
+    // Clean up unused workers
+    const allWorkers = await Worker.findAll();
+    const unusedWorkers = allWorkers.filter(w => !activeWorkerIds.has(w.id));
+    
+    if (unusedWorkers.length > 0) {
+      console.log(`\nCleaning up ${unusedWorkers.length} unused workers...`);
+      await Promise.all(unusedWorkers.map(worker => {
+        console.log(`Deleting unused worker ${worker.type} #${worker.instance_number}`);
+        return worker.destroy();
+      }));
+    }
+
+    console.log('\nURL distribution completed');
   }
 
   private async processMetadataExtraction(task: Task): Promise<void> {
@@ -303,6 +490,8 @@ export class MasterServer {
   }
 
   async start(): Promise<void> {
+    await this.initialize();
+    
     if (!this.isInitialized) {
       throw new Error('Server must be initialized before starting');
     }

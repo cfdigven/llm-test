@@ -3,7 +3,7 @@ import { Model, DataTypes, Sequelize } from 'sequelize';
 export class Task extends Model {
   public id!: string;
   public type!: string;
-  public status!: string;
+  public status!: 'todo' | 'processing' | 'done' | 'error';
   public details!: any;
   public error?: string;
   public readonly created_at!: Date;
@@ -13,8 +13,7 @@ export class Task extends Model {
 export function initTaskModel(sequelize: Sequelize): void {
   Task.init({
     id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
+      type: DataTypes.STRING,
       primaryKey: true
     },
     type: {
@@ -22,12 +21,13 @@ export function initTaskModel(sequelize: Sequelize): void {
       allowNull: false
     },
     status: {
-      type: DataTypes.ENUM('pending', 'running', 'done', 'failed'),
+      type: DataTypes.ENUM('todo', 'processing', 'done', 'error'),
       allowNull: false,
-      defaultValue: 'pending'
+      defaultValue: 'todo'
     },
     details: {
       type: DataTypes.JSONB,
+      allowNull: false,
       defaultValue: {}
     },
     error: {
@@ -38,6 +38,10 @@ export function initTaskModel(sequelize: Sequelize): void {
     sequelize,
     tableName: 'tasks',
     timestamps: true,
-    underscored: true
+    underscored: true,
+    indexes: [
+      { fields: ['type'] },
+      { fields: ['status'] }
+    ]
   });
 } 

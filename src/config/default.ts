@@ -40,11 +40,32 @@ const config: SystemConfig = {
     password: process.env.REDIS_PASSWORD
   },
 
-  workers: {
-    batchSize: 1000,
-    maxRetries: 3,
-    timeoutMinutes: 60
-  }
+  workers: [
+    {
+      name: 'blog-worker',
+      urlPatterns: ['^/blog/.*', '^/articles/.*'],
+      priority: 100,
+      batchSize: 500,
+      concurrency: 5,
+      instances: 2
+    },
+    {
+      name: 'product-worker',
+      urlPatterns: ['^/products/.*', '^/reviews/.*'],
+      priority: 90,
+      batchSize: 200,
+      concurrency: 3,
+      instances: 3
+    },
+    {
+      name: 'default-worker',
+      urlPatterns: ['.*'],
+      priority: 0,
+      batchSize: 100,
+      concurrency: 5,
+      instances: 2
+    }
+  ]
 };
 
 export default config; 
