@@ -1,4 +1,5 @@
 import { Model, DataTypes, Sequelize } from 'sequelize';
+import { Metadata } from './Metadata';
 
 export class URL extends Model {
   public id!: string;
@@ -12,6 +13,7 @@ export class URL extends Model {
   public worker_type?: string;
   public readonly created_at!: Date;
   public readonly updated_at!: Date;
+  public metadata?: Metadata;
 }
 
 export function initURLModel(sequelize: Sequelize): void {

@@ -9,6 +9,7 @@ import Redis from 'ioredis';
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { Metadata } from '../db/models';
 
 export class MasterServer {
   private sequelize!: Sequelize;
@@ -196,6 +197,7 @@ export class MasterServer {
         case 'cleanup':
           if (!nextTask.details.next_run || new Date(nextTask.details.next_run) > new Date()) {
             shouldSetDone = false;
+            nextTask.status = 'todo';
           } else {
             await this.processCleanup(nextTask);
           }
@@ -208,8 +210,6 @@ export class MasterServer {
 
       if (shouldSetDone) {
         nextTask.status = 'done';
-      } else {
-        nextTask.status = 'todo';
       }
     } catch (error) {
       console.error(`Error processing task ${nextTask.type}:`, error);
@@ -444,8 +444,137 @@ export class MasterServer {
   }
 
   private async generateFiles(task: Task): Promise<void> {
-    // Implementation will be added later
-    console.log('Processing file generation task');
+    console.log('Starting file generation task');
+
+    // Get all domains with processed URLs
+    const domains = await URL.findAll({
+      attributes: ['domain'],
+      where: {
+        status: 'done'
+      },
+      group: ['domain']
+    });
+
+    for (const domainRecord of domains) {
+      const domain = domainRecord.domain;
+      console.log(`Processing domain: ${domain}`);
+
+      // Get domain configuration
+      const domainConfig = this.config.domains.find(d => d.domain === domain);
+      if (!domainConfig) {
+        console.warn(`No configuration found for domain ${domain}, skipping...`);
+        continue;
+      }
+
+      // Create domain directory in current data path
+      const domainDir = path.join(this.config.storage.paths.current, domain);
+      await fs.mkdir(domainDir, { recursive: true });
+
+      // Get all processed URLs with metadata for this domain
+      const urls = await URL.findAll({
+        where: {
+          domain,
+          status: 'done'
+        },
+        include: [{
+          model: Metadata,
+          as: 'metadata',
+          required: true
+        }],
+        order: [['priority', 'DESC']]
+      });
+
+      if (urls.length === 0) {
+        console.log(`No processed URLs found for domain ${domain}`);
+        continue;
+      }
+
+      console.log(`Found ${urls.length} processed URLs for domain ${domain}`);
+
+      // Calculate number of segments needed
+      const segmentSize = domainConfig.segmentSize;
+      const numSegments = Math.ceil(urls.length / segmentSize);
+
+      // Generate segment files
+      const segmentFiles: string[] = [];
+      for (let i = 0; i < numSegments; i++) {
+        const segmentUrls = urls.slice(i * segmentSize, (i + 1) * segmentSize);
+        const segmentContent = this.generateMarkdownContent(segmentUrls);
+        const segmentFileName = `segment-${i + 1}.md`;
+        const segmentPath = path.join(domainDir, segmentFileName);
+        
+        await fs.writeFile(segmentPath, segmentContent, 'utf8');
+        segmentFiles.push(segmentFileName);
+        console.log(`Generated segment file ${segmentFileName} for domain ${domain}`);
+      }
+
+      // Generate main index file
+      const indexContent = this.generateIndexFile(domain, segmentFiles);
+      await fs.writeFile(path.join(domainDir, 'llms.txt'), indexContent, 'utf8');
+      console.log(`Generated main index file for domain ${domain}`);
+
+      // Archive old versions if needed
+      await this.archiveOldVersions(domain);
+    }
+
+    console.log('File generation completed');
+  }
+
+  private generateMarkdownContent(urls: URL[]): string {
+    let content = '';
+    
+    for (const url of urls) {
+      const metadata = url.metadata!;
+      content += '---\n';
+      content += `URL: ${url.url}\n`;
+      content += `Title: ${metadata.title || 'Untitled'}\n`;
+      if (metadata.description) content += `Description: ${metadata.description}\n`;
+      if (metadata.author) content += `Author: ${metadata.author}\n`;
+      if (metadata.date) content += `Date: ${metadata.date}\n`;
+      content += '---\n\n';
+    }
+
+    return content;
+  }
+
+  private generateIndexFile(domain: string, segmentFiles: string[]): string {
+    let content = `# Content Index for ${domain}\n\n`;
+    content += `Last Updated: ${new Date().toISOString()}\n\n`;
+    content += `Total Segments: ${segmentFiles.length}\n\n`;
+    
+    content += '## Segments\n\n';
+    for (const file of segmentFiles) {
+      content += `- [${file}](./${file})\n`;
+    }
+
+    return content;
+  }
+
+  private async archiveOldVersions(domain: string): Promise<void> {
+    const archivePath = this.config.storage.paths.archive;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const archiveDomainDir = path.join(archivePath, domain);
+    
+    // Create archive directory if it doesn't exist
+    await fs.mkdir(archiveDomainDir, { recursive: true });
+
+    // Move current version to archive
+    const currentDomainDir = path.join(this.config.storage.paths.current, domain);
+    const archiveVersionDir = path.join(archiveDomainDir, timestamp);
+    await fs.cp(currentDomainDir, archiveVersionDir, { recursive: true });
+
+    // Clean up old versions if needed
+    const versions = await fs.readdir(archiveDomainDir);
+    if (versions.length > this.config.storage.retainVersions) {
+      // Sort versions by date (oldest first)
+      versions.sort();
+      // Remove oldest versions
+      const versionsToRemove = versions.slice(0, versions.length - this.config.storage.retainVersions);
+      for (const version of versionsToRemove) {
+        await fs.rm(path.join(archiveDomainDir, version), { recursive: true });
+        console.log(`Removed old version ${version} for domain ${domain}`);
+      }
+    }
   }
 
   private async setNextSchedule(): Promise<void> {
