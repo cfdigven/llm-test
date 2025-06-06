@@ -11,6 +11,7 @@ export class URL extends Model {
   public worker_id?: string;
   public batch_id?: string;
   public worker_type?: string;
+  public sitemap_name?: string;
   public readonly created_at!: Date;
   public readonly updated_at!: Date;
   public metadata?: Metadata;
@@ -58,6 +59,10 @@ export function initURLModel(sequelize: Sequelize): void {
     worker_type: {
       type: DataTypes.STRING,
       allowNull: true
+    },
+    sitemap_name: {
+      type: DataTypes.STRING,
+      allowNull: true
     }
   }, {
     sequelize,
@@ -69,7 +74,8 @@ export function initURLModel(sequelize: Sequelize): void {
       { fields: ['domain'] },
       { fields: ['batch_id'] },
       { fields: ['worker_id'] },
-      { fields: ['worker_type'] }
+      { fields: ['worker_type'] },
+      { fields: ['sitemap_name'] }
     ]
   });
 } 

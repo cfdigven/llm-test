@@ -1,4 +1,4 @@
-import { Sequelize, DataTypes } from 'sequelize';
+import { Sequelize } from 'sequelize';
 import { initModels } from '../db/models';
 import { SystemConfig } from '../config/types';
 import { Task, URL, Worker } from '../db/models';
@@ -246,12 +246,13 @@ export class MasterServer {
             domain: domainConfig.domain,
             status: 'new',
             priority: siteUrl.priority || domainConfig.priority,
-            retries: 0
+            retries: 0,
+            sitemap_name: siteUrl.sitemapName
           }));
 
           await URL.bulkCreate(batch, {
-            updateOnDuplicate: ['priority', 'status', 'updated_at'],
-            fields: ['id', 'url', 'domain', 'status', 'priority', 'retries'],
+            updateOnDuplicate: ['priority', 'status', 'sitemap_name', 'updated_at'],
+            fields: ['id', 'url', 'domain', 'status', 'priority', 'retries', 'sitemap_name'],
             validate: true
           });
         }
@@ -330,7 +331,7 @@ export class MasterServer {
     // First, create all worker instances for each type
     for (const config of workerConfigs) {
       console.log(`Creating ${config.instances} workers for type ${config.name}`);
-      
+
       for (let instance = 1; instance <= config.instances; instance++) {
         const [worker] = await Worker.findOrCreate({
           where: {
@@ -400,7 +401,7 @@ export class MasterServer {
     // Clean up unused workers
     const allWorkers = await Worker.findAll();
     const unusedWorkers = allWorkers.filter(w => !activeWorkerIds.has(w.id));
-    
+
     if (unusedWorkers.length > 0) {
       console.log(`\nCleaning up ${unusedWorkers.length} unused workers...`);
       await Promise.all(unusedWorkers.map(worker => {
@@ -492,25 +493,52 @@ export class MasterServer {
 
         console.log(`Found ${urls.length} processed URLs for domain ${domain}`);
 
-        // Calculate number of segments needed
-        const segmentSize = domainConfig.segmentSize;
-        const numSegments = Math.ceil(urls.length / segmentSize);
+        // Group URLs by sitemap name
+        const urlsBySitemap = new Map<string, URL[]>();
+        urls.forEach(url => {
+          const sitemapName = url.sitemap_name || 'default';
+          if (!urlsBySitemap.has(sitemapName)) {
+            urlsBySitemap.set(sitemapName, []);
+          }
+          urlsBySitemap.get(sitemapName)!.push(url);
+        });
 
-        // Generate segment files in temp directory
-        const segmentFiles: string[] = [];
-        for (let i = 0; i < numSegments; i++) {
-          const segmentUrls = urls.slice(i * segmentSize, (i + 1) * segmentSize);
-          const segmentContent = this.generateMarkdownContent(segmentUrls);
-          const segmentFileName = `segment-${i + 1}.md`;
-          const segmentPath = path.join(tempDomainDir, segmentFileName);
-          
-          await fs.writeFile(segmentPath, segmentContent, 'utf8');
-          segmentFiles.push(segmentFileName);
-          console.log(`Generated segment file ${segmentFileName} for domain ${domain}`);
+        const segmentFiles: { sitemap: string; files: string[] }[] = [];
+
+        // Process each sitemap group
+        for (const [sitemapName, sitemapUrls] of urlsBySitemap.entries()) {
+          console.log(`Processing sitemap group: ${sitemapName} with ${sitemapUrls.length} URLs`);
+
+          // Create directory for this sitemap group
+          const sitemapDir = path.join(tempDomainDir, this.formatDirectoryName(sitemapName));
+          await fs.mkdir(sitemapDir, { recursive: true });
+
+          // Calculate number of segments needed for this sitemap group
+          const segmentSize = domainConfig.segmentSize;
+          const numSegments = Math.ceil(sitemapUrls.length / segmentSize);
+          const groupSegmentFiles: string[] = [];
+
+          // Generate segment files for this sitemap group
+          for (let i = 0; i < numSegments; i++) {
+            const segmentUrls = sitemapUrls.slice(i * segmentSize, (i + 1) * segmentSize);
+            const segmentContent = this.generateMarkdownContent(segmentUrls);
+            const segmentFileName = `${sitemapName}-segment-${i + 1}.md`;
+            const segmentPath = path.join(sitemapDir, segmentFileName);
+
+            await fs.writeFile(segmentPath, segmentContent, 'utf8');
+            groupSegmentFiles.push(segmentFileName);
+            console.log(`Generated segment file ${segmentFileName} for sitemap ${sitemapName}`);
+          }
+
+          // Remove group index generation
+          segmentFiles.push({
+            sitemap: sitemapName,
+            files: groupSegmentFiles
+          });
         }
 
         // Generate main index file in temp
-        const indexContent = this.generateIndexFile(domain, segmentFiles);
+        const indexContent = this.generateMainIndexFile(domain, segmentFiles);
         const indexPath = path.join(tempDomainDir, 'llms.txt');
         await fs.writeFile(indexPath, indexContent, 'utf8');
         console.log(`Generated main index file for domain ${domain}`);
@@ -550,7 +578,7 @@ export class MasterServer {
 
   private generateMarkdownContent(urls: URL[]): string {
     let content = '';
-    
+
     for (const url of urls) {
       const metadata = url.metadata!;
       content += '---\n';
@@ -565,15 +593,57 @@ export class MasterServer {
     return content;
   }
 
-  private generateIndexFile(domain: string, segmentFiles: string[]): string {
-    let content = `# Content Index for ${domain}\n\n`;
-    content += `Last Updated: ${new Date().toISOString()}\n\n`;
-    content += `Total Segments: ${segmentFiles.length}\n\n`;
-    
-    content += '## Segments\n\n';
-    for (const file of segmentFiles) {
-      content += `- [${file}](./${file})\n`;
+  private formatDirectoryName(name: string): string {
+    // Convert sitemap name to title case and remove special characters
+    return name.split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
+  }
+
+  private generateMainIndexFile(domain: string, segments: { sitemap: string; files: string[] }[]): string {
+    const domainConfig = this.config.domains.find(d => d.domain === domain);
+    if (!domainConfig) {
+      throw new Error(`No configuration found for domain ${domain}`);
     }
+
+    let content = `# LLMS.TXT for ${domain}\n\n`;
+    content += `${domainConfig.description}\n\n`;
+    content += `Due to the large number of pages on this site, metadata has been segmented into multiple text files. To fully understand the structure and content of the site, please follow and parse each of the segment files listed below.\n\n`;
+
+    // Group segments by type
+    const groupedSegments = new Map<string, string[]>();
+    segments.forEach(segment => {
+      const formattedName = this.formatDirectoryName(segment.sitemap);
+      segment.files.forEach(file => {
+        // Create full URL path using configured llmsPath
+        const segmentPath = `https://${domain}/${domainConfig.llmsPath}/${formattedName}/${file}`;
+        if (!groupedSegments.has(formattedName)) {
+          groupedSegments.set(formattedName, []);
+        }
+        groupedSegments.get(formattedName)!.push(segmentPath);
+      });
+    });
+
+    // Output each group
+    for (const [groupName, files] of groupedSegments.entries()) {
+      content += `## ${groupName} Segments\n\n`;
+
+      // Sort files numerically by segment number
+      files.sort((a, b) => {
+        const getSegmentNumber = (path: string) => {
+          const match = path.match(/segment-(\d+)/);
+          return match ? parseInt(match[1]) : 0;
+        };
+        return getSegmentNumber(a) - getSegmentNumber(b);
+      });
+
+      files.forEach(file => {
+        content += `- [${path.basename(file)}](${file})\n`;
+      });
+      content += '\n';
+    }
+
+    content += 'Each segment contains page-level metadata including title, meta description, and canonical URL.\n';
 
     return content;
   }
@@ -582,7 +652,7 @@ export class MasterServer {
     const archivePath = this.config.storage.paths.archive;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const archiveDomainDir = path.join(archivePath, domain);
-    
+
     // Create archive directory if it doesn't exist
     await fs.mkdir(archiveDomainDir, { recursive: true });
 
@@ -634,15 +704,15 @@ export class MasterServer {
 
   private async processCleanup(task: Task): Promise<void> {
     console.log('Processing cleanup task');
-    
+
     // Drop all tables and recreate them
     console.log('Resetting database...');
     await this.sequelize.drop();
     await this.sequelize.sync({ force: true });
-    
+
     // Reinitialize tasks
     await this.initializePredefinedTasks();
-    
+
     console.log('Cleanup completed');
   }
 
@@ -656,43 +726,89 @@ export class MasterServer {
   }
 
   private async uploadToS3(sourceDir: string, domain: string): Promise<void> {
-    if (!this.config.storage.s3) {
+    const s3Config = this.config.storage.s3;
+    if (!s3Config) {
       return;
     }
 
     console.log(`Uploading files for domain ${domain} to S3`);
 
-    // Read all files in the directory
-    const files = await fs.readdir(sourceDir);
+    // Import S3Client and PutObjectCommand from AWS SDK v3
+    const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
 
-    for (const file of files) {
-      const filePath = path.join(sourceDir, file);
-      const stats = await fs.stat(filePath);
-
-      if (stats.isFile()) {
-        const fileContent = await fs.readFile(filePath);
-        const s3Key = `${domain}/${file}`;
-
-        try {
-          await this.config.storage.s3.upload({
-            Bucket: this.config.storage.s3.bucket,
-            Key: s3Key,
-            Body: fileContent,
-            ContentType: file.endsWith('.md') ? 'text/markdown' : 'text/plain',
-            ACL: 'public-read'
-          }).promise();
-
-          console.log(`Uploaded ${file} to S3 for domain ${domain}`);
-        } catch (error) {
-          console.error(`Failed to upload ${file} to S3:`, error);
-        }
+    // Initialize S3 client
+    const s3Client = new S3Client({
+      region: s3Config.region,
+      credentials: {
+        accessKeyId: s3Config.accessKeyId,
+        secretAccessKey: s3Config.secretAccessKey,
       }
+    });
+
+    try {
+      // Clean up existing files in the domain directory
+      console.log(`Cleaning up existing files for ${domain} in S3...`);
+      const listCommand = new ListObjectsV2Command({
+        Bucket: s3Config.bucket,
+        Prefix: `${domain}/`
+      });
+
+      const existingFiles = await s3Client.send(listCommand);
+      if (existingFiles.Contents) {
+        await Promise.all(existingFiles.Contents.map(file => {
+          if (file.Key) {
+            const deleteCommand = new DeleteObjectCommand({
+              Bucket: s3Config.bucket,
+              Key: file.Key
+            });
+            return s3Client.send(deleteCommand);
+          }
+        }));
+      }
+
+      // Upload new files
+      const processDirectory = async (dirPath: string) => {
+        const files = await fs.readdir(dirPath);
+
+        for (const file of files) {
+          const filePath = path.join(dirPath, file);
+          const stats = await fs.stat(filePath);
+
+          if (stats.isDirectory()) {
+            await processDirectory(filePath);
+          } else {
+            const fileContent = await fs.readFile(filePath);
+            const relativePath = path.relative(sourceDir, filePath);
+            const s3Key = `${domain}/${relativePath}`;
+
+            console.log(`Uploading ${relativePath} to S3...`);
+            
+            const uploadCommand = new PutObjectCommand({
+              Bucket: s3Config.bucket,
+              Key: s3Key,
+              Body: fileContent,
+              ContentType: file.endsWith('.md') ? 'text/markdown' : 'text/plain',
+              ACL: 'public-read'
+            });
+
+            await s3Client.send(uploadCommand);
+            console.log(`Successfully uploaded ${relativePath}`);
+          }
+        }
+      };
+
+      await processDirectory(sourceDir);
+      console.log(`Completed S3 upload for domain ${domain}`);
+
+    } catch (error) {
+      console.error(`Error during S3 operations for ${domain}:`, error);
+      throw error;
     }
   }
 
   async start(): Promise<void> {
     await this.initialize();
-    
+
     if (!this.isInitialized) {
       throw new Error('Server must be initialized before starting');
     }

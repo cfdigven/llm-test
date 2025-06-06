@@ -7,14 +7,16 @@ const config: SystemConfig = {
     timeOfDay: '00:00',
     timezone: 'UTC'
   },
-  
+
   domains: [
     {
       domain: 'theseniorlist.com',
       priority: 1,
-      segmentSize: 5000
+      segmentSize: 10,
+      title: 'LLMS.TXT for theseniorlist.com',
+      description: 'The Senior List is a comprehensive directory of senior living communities across the United States. It provides detailed information about each community, including amenities, services, and pricing. The Senior List is a valuable resource for seniors and their families looking for the best senior living options.',
+      llmsPath: 'llms'
     }
-    // Add more domains here
   ],
 
   storage: {
@@ -23,6 +25,12 @@ const config: SystemConfig = {
       current: path.resolve(process.cwd(), 'data/current'),
       temp: path.resolve(process.cwd(), 'data/temp'),
       archive: path.resolve(process.cwd(), 'data/archive')
+    },
+    s3: {
+      bucket: 'llm-content',
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
+      region: process.env.AWS_REGION ?? ''
     }
   },
 

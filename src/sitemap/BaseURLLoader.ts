@@ -8,6 +8,18 @@ export abstract class BaseURLLoader implements URLLoader {
   abstract urlPatterns: string[];
   abstract sitemapPath: string;
 
+  private extractSitemapName(sitemapUrl: string): string {
+    try {
+      const match = sitemapUrl.match(/\/([^\/]+)-sitemap\.xml$/);
+      if (match && match[1]) {
+        return match[1];
+      }
+      return 'default';
+    } catch {
+      return 'default';
+    }
+  }
+
   matches(url: string): boolean {
     try {
       const normalizedUrl = new URL(url).toString();
@@ -32,6 +44,12 @@ export abstract class BaseURLLoader implements URLLoader {
     const response = await axios.get(url);
     const result = await parseStringPromise(response.data);
     const urls: SiteURL[] = [];
+    const sitemapName = this.extractSitemapName(url);
+
+    if (sitemapName === 'llms') {
+      console.log(`Skipping sitemap with name: ${sitemapName}`);
+      return [];
+    }
 
     if (result.sitemapindex?.sitemap) {
       for (const sitemap of result.sitemapindex.sitemap) {
@@ -43,7 +61,8 @@ export abstract class BaseURLLoader implements URLLoader {
         urls.push({
           url: entry.loc[0],
           lastmod: entry.lastmod?.[0],
-          priority: entry.priority?.[0] ? parseFloat(entry.priority[0]) : undefined
+          priority: entry.priority?.[0] ? parseFloat(entry.priority[0]) : undefined,
+          sitemapName: sitemapName
         });
       }
     }

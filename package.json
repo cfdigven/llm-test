@@ -11,6 +11,7 @@
     "reset-db": "ts-node scripts/resetDb.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.825.0",
     "@types/xml2js": "^0.4.14",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",

@@ -10,17 +10,16 @@ export interface DomainConfig {
   domain: string;
   priority: number;  // Higher number = higher priority
   segmentSize: number;  // Number of URLs per segment file
+  title: string;  // Site title for llms.txt
+  description: string;  // Site description for llms.txt
+  llmsPath: string;  // Base path for llms files (e.g., "llms" or "content/llms")
 }
 
 export interface S3Config {
   bucket: string;
-  upload(params: {
-    Bucket: string;
-    Key: string;
-    Body: Buffer;
-    ContentType: string;
-    ACL: string;
-  }): { promise(): Promise<void> };
+  accessKeyId: string;
+  secretAccessKey: string;
+  region: string;
 }
 
 export interface StorageConfig {
@@ -105,6 +104,7 @@ export interface SiteURL {
   url: string;
   lastmod?: string;
   priority?: number;
+  sitemapName?: string;
 }
 
 export interface URLLoader {
