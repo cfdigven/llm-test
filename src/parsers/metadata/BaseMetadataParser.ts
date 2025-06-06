@@ -1,6 +1,5 @@
-import { CheerioAPI } from 'cheerio';
-import { MetadataParser } from './types';
+import { MetadataParser } from '../../config/types';
 
 export abstract class BaseMetadataParser implements MetadataParser {
-  abstract parse($: CheerioAPI): string | null;
+  abstract parse($: any): string | null;
 } 

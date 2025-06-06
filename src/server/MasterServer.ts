@@ -459,63 +459,91 @@ export class MasterServer {
       const domain = domainRecord.domain;
       console.log(`Processing domain: ${domain}`);
 
-      // Get domain configuration
-      const domainConfig = this.config.domains.find(d => d.domain === domain);
-      if (!domainConfig) {
-        console.warn(`No configuration found for domain ${domain}, skipping...`);
-        continue;
+      try {
+        // Get domain configuration
+        const domainConfig = this.config.domains.find(d => d.domain === domain);
+        if (!domainConfig) {
+          console.warn(`No configuration found for domain ${domain}, skipping...`);
+          continue;
+        }
+
+        // Create temp directory for this domain
+        const tempDomainDir = path.join(this.config.storage.paths.temp, domain);
+        await fs.mkdir(tempDomainDir, { recursive: true });
+
+        // Get all processed URLs with metadata for this domain
+        const urls = await URL.findAll({
+          where: {
+            domain,
+            status: 'done'
+          },
+          include: [{
+            model: Metadata,
+            as: 'metadata',
+            required: true
+          }],
+          order: [['priority', 'DESC']]
+        });
+
+        if (urls.length === 0) {
+          console.log(`No processed URLs found for domain ${domain}`);
+          continue;
+        }
+
+        console.log(`Found ${urls.length} processed URLs for domain ${domain}`);
+
+        // Calculate number of segments needed
+        const segmentSize = domainConfig.segmentSize;
+        const numSegments = Math.ceil(urls.length / segmentSize);
+
+        // Generate segment files in temp directory
+        const segmentFiles: string[] = [];
+        for (let i = 0; i < numSegments; i++) {
+          const segmentUrls = urls.slice(i * segmentSize, (i + 1) * segmentSize);
+          const segmentContent = this.generateMarkdownContent(segmentUrls);
+          const segmentFileName = `segment-${i + 1}.md`;
+          const segmentPath = path.join(tempDomainDir, segmentFileName);
+          
+          await fs.writeFile(segmentPath, segmentContent, 'utf8');
+          segmentFiles.push(segmentFileName);
+          console.log(`Generated segment file ${segmentFileName} for domain ${domain}`);
+        }
+
+        // Generate main index file in temp
+        const indexContent = this.generateIndexFile(domain, segmentFiles);
+        const indexPath = path.join(tempDomainDir, 'llms.txt');
+        await fs.writeFile(indexPath, indexContent, 'utf8');
+        console.log(`Generated main index file for domain ${domain}`);
+
+        // Create current directory if it doesn't exist
+        const currentDomainDir = path.join(this.config.storage.paths.current, domain);
+        await fs.mkdir(currentDomainDir, { recursive: true });
+
+        // Archive current version if it exists
+        if (await this.pathExists(currentDomainDir)) {
+          await this.archiveOldVersions(domain);
+        }
+
+        // Move files from temp to current
+        await fs.rm(currentDomainDir, { recursive: true, force: true });
+        await fs.rename(tempDomainDir, currentDomainDir);
+
+        // Upload to S3 if configured
+        if (this.config.storage.s3) {
+          await this.uploadToS3(currentDomainDir, domain);
+        }
+
+      } catch (error) {
+        console.error(`Error processing domain ${domain}:`, error);
+        // Clean up temp directory on error
+        const tempDomainDir = path.join(this.config.storage.paths.temp, domain);
+        await fs.rm(tempDomainDir, { recursive: true, force: true });
       }
-
-      // Create domain directory in current data path
-      const domainDir = path.join(this.config.storage.paths.current, domain);
-      await fs.mkdir(domainDir, { recursive: true });
-
-      // Get all processed URLs with metadata for this domain
-      const urls = await URL.findAll({
-        where: {
-          domain,
-          status: 'done'
-        },
-        include: [{
-          model: Metadata,
-          as: 'metadata',
-          required: true
-        }],
-        order: [['priority', 'DESC']]
-      });
-
-      if (urls.length === 0) {
-        console.log(`No processed URLs found for domain ${domain}`);
-        continue;
-      }
-
-      console.log(`Found ${urls.length} processed URLs for domain ${domain}`);
-
-      // Calculate number of segments needed
-      const segmentSize = domainConfig.segmentSize;
-      const numSegments = Math.ceil(urls.length / segmentSize);
-
-      // Generate segment files
-      const segmentFiles: string[] = [];
-      for (let i = 0; i < numSegments; i++) {
-        const segmentUrls = urls.slice(i * segmentSize, (i + 1) * segmentSize);
-        const segmentContent = this.generateMarkdownContent(segmentUrls);
-        const segmentFileName = `segment-${i + 1}.md`;
-        const segmentPath = path.join(domainDir, segmentFileName);
-        
-        await fs.writeFile(segmentPath, segmentContent, 'utf8');
-        segmentFiles.push(segmentFileName);
-        console.log(`Generated segment file ${segmentFileName} for domain ${domain}`);
-      }
-
-      // Generate main index file
-      const indexContent = this.generateIndexFile(domain, segmentFiles);
-      await fs.writeFile(path.join(domainDir, 'llms.txt'), indexContent, 'utf8');
-      console.log(`Generated main index file for domain ${domain}`);
-
-      // Archive old versions if needed
-      await this.archiveOldVersions(domain);
     }
+
+    // Clean up temp directory
+    await fs.rm(this.config.storage.paths.temp, { recursive: true, force: true });
+    await fs.mkdir(this.config.storage.paths.temp, { recursive: true });
 
     console.log('File generation completed');
   }
@@ -616,6 +644,50 @@ export class MasterServer {
     await this.initializePredefinedTasks();
     
     console.log('Cleanup completed');
+  }
+
+  private async pathExists(path: string): Promise<boolean> {
+    try {
+      await fs.access(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async uploadToS3(sourceDir: string, domain: string): Promise<void> {
+    if (!this.config.storage.s3) {
+      return;
+    }
+
+    console.log(`Uploading files for domain ${domain} to S3`);
+
+    // Read all files in the directory
+    const files = await fs.readdir(sourceDir);
+
+    for (const file of files) {
+      const filePath = path.join(sourceDir, file);
+      const stats = await fs.stat(filePath);
+
+      if (stats.isFile()) {
+        const fileContent = await fs.readFile(filePath);
+        const s3Key = `${domain}/${file}`;
+
+        try {
+          await this.config.storage.s3.upload({
+            Bucket: this.config.storage.s3.bucket,
+            Key: s3Key,
+            Body: fileContent,
+            ContentType: file.endsWith('.md') ? 'text/markdown' : 'text/plain',
+            ACL: 'public-read'
+          }).promise();
+
+          console.log(`Uploaded ${file} to S3 for domain ${domain}`);
+        } catch (error) {
+          console.error(`Failed to upload ${file} to S3:`, error);
+        }
+      }
+    }
   }
 
   async start(): Promise<void> {

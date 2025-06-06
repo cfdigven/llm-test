@@ -1,8 +1,17 @@
-import { CheerioAPI } from 'cheerio';
-import { PageMetadata, PageParserConfig } from './types';
+import { Parser, MetadataParser } from '../../config/types';
 
-export abstract class BasePageParser {
-  constructor(protected readonly config: PageParserConfig) {}
+export abstract class BasePageParser implements Parser {
+  abstract titleParser: MetadataParser;
+  abstract descriptionParser: MetadataParser;
+  abstract authorParser: MetadataParser;
+  abstract dateParser: MetadataParser;
 
-  abstract parseMetadata($: CheerioAPI): PageMetadata;
+  parseMetadata($: any) {
+    return {
+      title: this.titleParser.parse($) || 'Untitled',
+      description: this.descriptionParser.parse($),
+      author: this.authorParser.parse($),
+      date: this.dateParser.parse($)
+    };
+  }
 } 

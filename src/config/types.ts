@@ -12,6 +12,17 @@ export interface DomainConfig {
   segmentSize: number;  // Number of URLs per segment file
 }
 
+export interface S3Config {
+  bucket: string;
+  upload(params: {
+    Bucket: string;
+    Key: string;
+    Body: Buffer;
+    ContentType: string;
+    ACL: string;
+  }): { promise(): Promise<void> };
+}
+
 export interface StorageConfig {
   retainVersions: number;
   paths: {
@@ -19,6 +30,7 @@ export interface StorageConfig {
     temp: string;
     archive: string;
   };
+  s3?: S3Config;
 }
 
 export interface DatabaseConfig {
@@ -51,4 +63,55 @@ export interface SystemConfig {
   database: DatabaseConfig;
   redis: RedisConfig;
   workers: WorkerConfig[];  // Array of worker configurations
+}
+
+export interface MetadataParser {
+  parse($: any): string | null;
+}
+
+export interface PageMetadata {
+  url: string;
+  title: string;
+  description: string | null;
+  author: string | null;
+  date: string | null;
+}
+
+export interface Parser {
+  parseMetadata($: any): {
+    title: string;
+    description: string | null;
+    author: string | null;
+    date: string | null;
+  };
+}
+
+export interface FetchResponse {
+  html: string;
+  url: string;
+  finalUrl: string;
+}
+
+export interface Fetcher {
+  name: string;
+  priority: number;
+  urlPatterns: string[];
+  parser: new () => Parser;
+  matches(url: string): boolean;
+  fetch(url: string): Promise<FetchResponse>;
+}
+
+export interface SiteURL {
+  url: string;
+  lastmod?: string;
+  priority?: number;
+}
+
+export interface URLLoader {
+  name: string;
+  priority: number;
+  urlPatterns: string[];
+  sitemapPath: string;
+  matches(url: string): boolean;
+  getURLs(domain: string): Promise<SiteURL[]>;
 } 

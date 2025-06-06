@@ -1,33 +1,9 @@
-import { CheerioAPI } from 'cheerio';
-import { PageMetadata } from './types';
+import { DefaultAuthorParser, DefaultDateParser, DefaultDescriptionParser, DefaultTitleParser } from '../metadata';
 import { BasePageParser } from './BasePageParser';
-import { DefaultTitleParser, DefaultDescriptionParser, DefaultDateParser, DefaultAuthorParser } from '../metadata';
 
 export class DefaultParser extends BasePageParser {
-  private titleParser = new DefaultTitleParser();
-  private descriptionParser = new DefaultDescriptionParser();
-  private dateParser = new DefaultDateParser();
-  private authorParser = new DefaultAuthorParser();
-
-  constructor() {
-    super({
-      name: 'DefaultParser',
-      metadataParsers: {
-        title: DefaultTitleParser,
-        description: DefaultDescriptionParser,
-        date: DefaultDateParser,
-        author: DefaultAuthorParser
-      }
-    });
-  }
-
-  parseMetadata($: CheerioAPI): PageMetadata {
-    return {
-      url: '',  // This will be set by the loader
-      title: this.titleParser.parse($),
-      description: this.descriptionParser.parse($),
-      date: this.dateParser.parse($),
-      author: this.authorParser.parse($)
-    };
-  }
+    titleParser = new DefaultTitleParser();
+    descriptionParser = new DefaultDescriptionParser();
+    authorParser = new DefaultAuthorParser();
+    dateParser = new DefaultDateParser();
 } 

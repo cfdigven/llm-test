@@ -4,7 +4,7 @@ export function calculateNextRun(scheduleType: ScheduleType, timeOfDay: string, 
   const [hours, minutes] = timeOfDay.split(':').map(Number);
   const now = new Date();
   let nextRun = new Date();
-  
+
   // Set time of day
   nextRun.setUTCHours(hours, minutes, 0, 0);
 
