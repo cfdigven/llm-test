@@ -14,8 +14,16 @@ export interface SitemapConfig {
   description: string;  // Detailed description of what these pages contain
 }
 
+export enum Environment {
+  PROD = 'prod',
+  DEV = 'dev',
+  UAT = 'uat',
+  QA = 'qa'
+}
+
 export interface DomainConfig {
   domain: string;
+  environment: Environment;
   priority: number;  // Higher number = higher priority
   segmentSize: number;  // Number of URLs per segment file
   title: string;  // Site title for llms.txt

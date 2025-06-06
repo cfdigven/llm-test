@@ -461,16 +461,16 @@ export class MasterServer {
       console.log(`Processing domain: ${domain}`);
 
       try {
-        // Get domain configuration
         const domainConfig = this.config.domains.find(d => d.domain === domain);
         if (!domainConfig) {
           console.warn(`No configuration found for domain ${domain}, skipping...`);
           continue;
         }
 
-        // Create temp directory for this domain
+        // Create temp directory structure
         const tempDomainDir = path.join(this.config.storage.paths.temp, domain);
-        await fs.mkdir(tempDomainDir, { recursive: true });
+        const tempLlmsDir = path.join(tempDomainDir, domainConfig.llmsPath);
+        await fs.mkdir(tempLlmsDir, { recursive: true });
 
         // Get all processed URLs with metadata for this domain
         const urls = await URL.findAll({
@@ -509,8 +509,8 @@ export class MasterServer {
         for (const [sitemapName, sitemapUrls] of urlsBySitemap.entries()) {
           console.log(`Processing sitemap group: ${sitemapName} with ${sitemapUrls.length} URLs`);
 
-          // Create directory for this sitemap group
-          const sitemapDir = path.join(tempDomainDir, this.formatDirectoryName(sitemapName));
+          // Create directory for this sitemap group inside llms folder
+          const sitemapDir = path.join(tempLlmsDir, this.formatDirectoryName(sitemapName));
           await fs.mkdir(sitemapDir, { recursive: true });
 
           // Calculate number of segments needed for this sitemap group
@@ -537,15 +537,16 @@ export class MasterServer {
           });
         }
 
-        // Generate main index file in temp
+        // Generate main index file in temp root
         const indexContent = this.generateMainIndexFile(domain, segmentFiles);
         const indexPath = path.join(tempDomainDir, 'llms.txt');
         await fs.writeFile(indexPath, indexContent, 'utf8');
         console.log(`Generated main index file for domain ${domain}`);
 
-        // Create current directory if it doesn't exist
+        // Create current directory structure
         const currentDomainDir = path.join(this.config.storage.paths.current, domain);
-        await fs.mkdir(currentDomainDir, { recursive: true });
+        const currentLlmsDir = path.join(currentDomainDir, domainConfig.llmsPath);
+        await fs.mkdir(currentLlmsDir, { recursive: true });
 
         // Archive current version if it exists
         if (await this.pathExists(currentDomainDir)) {

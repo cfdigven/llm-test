@@ -1,4 +1,4 @@
-import { SystemConfig } from './types';
+import { Environment, SystemConfig } from './types';
 import path from 'path';
 
 const config: SystemConfig = {
@@ -11,12 +11,12 @@ const config: SystemConfig = {
   domains: [
     {
       domain: 'broadbandnow.com',
+      environment: Environment.PROD,
       priority: 1,
       segmentSize: 500,
       title: 'LLMS.TXT for broadbandnow.com',
       description: 'BroadbandNow is a comprehensive directory of internet service providers across the United States. It provides detailed information about each provider, including pricing, speeds, and availability. BroadbandNow is a valuable resource for consumers looking for the best internet service options.',
       llmsPath: 'llms',
-
       sitemaps: [
         {
           name: 'page',
