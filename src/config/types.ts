@@ -1,9 +1,17 @@
+import { URL as UrlModel } from '../db/models';
+
 export type ScheduleType = 'daily' | 'two_days' | 'weekly' | 'two_weeks' | 'monthly';
 
 export interface ScheduleConfig {
   type: ScheduleType;
   timeOfDay: string; // HH:mm format
   timezone: string;
+}
+
+export interface SitemapConfig {
+  name: string;  // Sitemap name (e.g., 'bbn_prov_review', 'report')
+  title: string;  // Display title (e.g., 'Provider Review Pages')
+  description: string;  // Detailed description of what these pages contain
 }
 
 export interface DomainConfig {
@@ -13,6 +21,7 @@ export interface DomainConfig {
   title: string;  // Site title for llms.txt
   description: string;  // Site description for llms.txt
   llmsPath: string;  // Base path for llms files (e.g., "llms" or "content/llms")
+  sitemaps: SitemapConfig[];  // Configuration for each sitemap type
 }
 
 export interface S3Config {
@@ -95,9 +104,13 @@ export interface Fetcher {
   name: string;
   priority: number;
   urlPatterns: string[];
+  sitemapNames: string[];
   parser: new () => Parser;
-  matches(url: string): boolean;
+  matches(urlRow: UrlModel): boolean;
+  matchesSitemap(urlRow: UrlModel): boolean;
+  matchesUrl(url: string): boolean;
   fetch(url: string): Promise<FetchResponse>;
+  parse(html: string): Promise<PageMetadata>;
 }
 
 export interface SiteURL {

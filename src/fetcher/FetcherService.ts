@@ -1,6 +1,6 @@
-import { load as cheerioLoad } from 'cheerio';
 import { Fetcher, PageMetadata } from '../config/types';
 import { DefaultFetcher } from './DefaultFetcher';
+import { URL } from '../db/models';
 
 export class FetcherService {
   private readonly fetchers: Fetcher[];
@@ -11,20 +11,8 @@ export class FetcherService {
     ].sort((a, b) => b.priority - a.priority);
   }
 
-  async getMetadata(url: string): Promise<PageMetadata> {
-    const fetcher = this.fetchers.find(f => f.matches(url)) || this.fetchers[this.fetchers.length - 1];
-    const { html, finalUrl } = await fetcher.fetch(url);
-
-    const parser = new fetcher.parser();
-    const $ = cheerioLoad(html);
-    const rawMetadata = parser.parseMetadata($);
-
-    return {
-      title: rawMetadata.title,
-      description: rawMetadata.description || null,
-      author: rawMetadata.author || null,
-      date: rawMetadata.date || null,
-      url: finalUrl
-    };
+  async getMetadata(urlRow: URL): Promise<PageMetadata> {
+    const fetcher = this.fetchers.find(f => f.matches(urlRow)) || this.fetchers[this.fetchers.length - 1];
+    return await fetcher.parse(urlRow.url);
   }
 } 

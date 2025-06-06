@@ -585,7 +585,7 @@ export class MasterServer {
       content += `URL: ${url.url}\n`;
       content += `Title: ${metadata.title || 'Untitled'}\n`;
       if (metadata.description) content += `Description: ${metadata.description}\n`;
-      if (metadata.author) content += `Author: ${metadata.author}\n`;
+      // if (metadata.author) content += `Author: ${metadata.author}\n`;
       if (metadata.date) content += `Date: ${metadata.date}\n`;
       content += '---\n\n';
     }
@@ -606,27 +606,35 @@ export class MasterServer {
       throw new Error(`No configuration found for domain ${domain}`);
     }
 
-    let content = `# LLMS.TXT for ${domain}\n\n`;
+    let content = `# ${domainConfig.title}\n\n`;
     content += `${domainConfig.description}\n\n`;
     content += `Due to the large number of pages on this site, metadata has been segmented into multiple text files. To fully understand the structure and content of the site, please follow and parse each of the segment files listed below.\n\n`;
 
     // Group segments by type
     const groupedSegments = new Map<string, string[]>();
     segments.forEach(segment => {
-      const formattedName = this.formatDirectoryName(segment.sitemap);
+      const sitemapConfig = domainConfig.sitemaps.find(s => s.name === segment.sitemap);
+      const title = sitemapConfig ? sitemapConfig.title : this.formatDirectoryName(segment.sitemap);
+      
       segment.files.forEach(file => {
         // Create full URL path using configured llmsPath
-        const segmentPath = `https://${domain}/${domainConfig.llmsPath}/${formattedName}/${file}`;
-        if (!groupedSegments.has(formattedName)) {
-          groupedSegments.set(formattedName, []);
+        const segmentPath = `https://${domain}/${domainConfig.llmsPath}/${this.formatDirectoryName(segment.sitemap)}/${file}`;
+        if (!groupedSegments.has(title)) {
+          groupedSegments.set(title, []);
         }
-        groupedSegments.get(formattedName)!.push(segmentPath);
+        groupedSegments.get(title)!.push(segmentPath);
       });
     });
 
-    // Output each group
-    for (const [groupName, files] of groupedSegments.entries()) {
-      content += `## ${groupName} Segments\n\n`;
+    // Output each group with its description
+    for (const [title, files] of groupedSegments.entries()) {
+      // Find the sitemap config for this group
+      const sitemapConfig = domainConfig.sitemaps.find(s => s.title === title);
+      
+      content += `## ${title}\n`;
+      if (sitemapConfig) {
+        content += `${sitemapConfig.description}\n\n`;
+      }
 
       // Sort files numerically by segment number
       files.sort((a, b) => {

@@ -142,12 +142,12 @@ export class WorkerServer {
         if (hasProcessingUrls === 0) {
           // No more URLs to process, mark worker as completed
           await Worker.update(
-            { 
+            {
               status: 'completed',
               current_batch_id: null,
               last_heartbeat: new Date()
             },
-            { 
+            {
               where: { id: this.workerId },
               transaction
             }
@@ -196,7 +196,7 @@ export class WorkerServer {
       // Update worker's current batch
       await Worker.update(
         { current_batch_id: nextBatch.batch_id },
-        { 
+        {
           where: { id: this.workerId },
           transaction
         }
@@ -220,7 +220,7 @@ export class WorkerServer {
       });
 
       // Extract metadata
-      const metadata = await this.fetcherService.getMetadata(url.url);
+      const metadata = await this.fetcherService.getMetadata(url);
 
       // Store metadata
       await Metadata.create({
@@ -264,8 +264,16 @@ export class WorkerServer {
     const queue = this.queue;
     console.log(`Processing batch of ${urls.length} URLs`);
 
-    // Process URLs with configured concurrency
-    const promises = urls.map(url => queue.add(() => this.processUrl(url)));
+    // Sleep function for delay
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Process URLs with configured concurrency and delay
+    const promises = urls.map(url =>
+      queue.add(async () => {
+        await this.processUrl(url);
+        await sleep(1500); // 1.5 second delay between URLs
+      })
+    );
     await Promise.all(promises);
 
     console.log(`Completed batch of ${urls.length} URLs`);
@@ -330,7 +338,7 @@ export class WorkerServer {
 
       // Get a single batch to process
       const batch = await this.findAndClaimNextBatch();
-      
+
       if (!batch) {
         console.log('No batch available to process, exiting...');
         await this.stop();
@@ -339,11 +347,11 @@ export class WorkerServer {
 
       console.log(`Processing batch of ${batch.length} URLs`);
       await this.processBatch(batch);
-      
+
       // Clear current batch ID after processing
       if (this.workerId) {
         await Worker.update(
-          { 
+          {
             current_batch_id: null,
             status: 'idle'  // Mark as idle so other processes can claim it
           },
